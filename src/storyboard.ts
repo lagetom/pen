@@ -4,7 +4,7 @@ export const HOT_PIXELS = 32_000_000;
 export type View = { zoom: number; panX: number; panY: number };
 type Frozen = { layer: Layer; image: Blob };
 export type Cut = { id: string; name: string; paint: Paint; cold: Frozen[] | null; thumbnail: string; view: View | null };
-export type ProjectV2 = { format: 'mini-paint'; version: 2; name: string; width: number; height: number; activeCut: string; whiteBackground: boolean; cuts: { id: string; name: string; layers: Project['layers']; activeLayer: number; view: View | null }[] };
+export type ProjectV2 = { format: 'mini-paint'; version: 2; name: string; width: number; height: number; activeCut: string; whiteBackground: boolean; cuts: { id: string; name: string; layers: Project['layers']; guide?: Project['guide']; activeLayer: number; view: View | null }[] };
 let sequence = 0;
 function makeCut(paint: Paint, name: string): Cut { return { id: `cut-${++sequence}`, name, paint, cold: null, thumbnail: '', view: null }; }
 export function thumbnailCanvas(width: number, height: number) {
@@ -109,13 +109,13 @@ export class Storyboard {
     const p = cut.paint;
     if (!cut.cold) return p.serialize(cut.name);
     const metadata = p.layers.map(l => ({ name:l.name, visible:l.visible, opacity:l.opacity, blob:cut.cold!.find(f=>f.layer===l)!.image }));
-    const width = p.width, height = p.height, name = cut.name;
-    return Promise.all(metadata.map(async l => ({name:l.name,visible:l.visible,opacity:l.opacity,image:await blobURL(l.blob)}))).then(layers=>({format:'mini-paint',version:1,width,height,name,layers}));
+    const width = p.width, height = p.height, name = cut.name, guide = {...p.guide};
+    return Promise.all(metadata.map(async l => ({name:l.name,visible:l.visible,opacity:l.opacity,image:await blobURL(l.blob)}))).then(layers=>({format:'mini-paint',version:1,width,height,name,guide,layers}));
   }
   async serialize(name: string): Promise<ProjectV2> {
     // Every hot cut synchronously clones its canvases before the first await; cold Blobs are immutable.
     const metadata = { format:'mini-paint' as const, version:2 as const, name, width:this.width, height:this.height, activeCut:this.current.id, whiteBackground:this.whiteBackground };
-    const pending = this.cuts.map(c => { const id=c.id, name=c.name, activeLayer=c.paint.layers.indexOf(c.paint.selected), view=c.view ? {...c.view}:null; const project=this.serializeCut(c); return project.then(p=>({id,name,activeLayer,view,layers:p.layers})); });
+    const pending = this.cuts.map(c => { const id=c.id, name=c.name, activeLayer=c.paint.layers.indexOf(c.paint.selected), view=c.view ? {...c.view}:null; const project=this.serializeCut(c); return project.then(p=>({id,name,activeLayer,view,guide:p.guide,layers:p.layers})); });
     return {...metadata,cuts:await Promise.all(pending)};
   }
   static async decode(raw: any): Promise<{ story: Storyboard; name: string }> {
@@ -136,7 +136,7 @@ export class Storyboard {
         ids.add(item.id);
         const p = new Paint();
         try {
-          p.load(await p.decode({format:'mini-paint',version:1,width:raw.width,height:raw.height,layers:item.layers}));
+          p.load(await p.decode({format:'mini-paint',version:1,width:raw.width,height:raw.height,guide:item.guide,layers:item.layers}));
           if (!Number.isInteger(item.activeLayer) || item.activeLayer < 0 || item.activeLayer >= p.layers.length) throw new Error('잘못된 선택 레이어입니다.');
           p.active = p.layers[item.activeLayer].id;
           const cut = makeCut(p,item.name.slice(0,100)); cut.id=item.id;

@@ -43,6 +43,8 @@ Cloudflare Pages 빌드 명령은 `npm run build`, 출력 디렉터리는 `dist`
 
 ## 구현 구조와 안정성
 
+- `src/pencil.ts`: 고정 시드 연필 팁과 거리 기반 스탬프 렌더링.
+- `src/guides.ts`: 그림 픽셀과 분리한 종이 가이드와 메타데이터 검증.
 - `src/engine.ts`: 독립 레이어 Canvas, 브러시 마스크 합성, 픽셀 명령 히스토리, 프로젝트 검증·직렬화.
 - `src/storyboard.ts`: 컷 관리, Canvas 압축·복원, 프로젝트 version 2.
 - `src/presets.ts`: 인스타툰 프리셋과 사용자 지정 크기 기억.
@@ -62,5 +64,7 @@ Cloudflare Pages 빌드 명령은 `npm run build`, 출력 디렉터리는 `dist`
 자동 테스트는 Chromium에서 실제 마우스 이벤트로 점 100회·작은 원 100회·빠른 지그재그, 30회 Undo/Redo, 20개 레이어, 펜/지우개, 확대 좌표, 취소 처리, 프로젝트/PNG, 복구, 오프라인 실행을 검사합니다. 합성 이벤트 검사는 실제 타블렛 드라이버·Windows 하드웨어 검증을 대신하지 않습니다. Windows Chrome/Edge 및 실제 마우스·타블렛에서 작은 원, 포인터 캡처, 파일 쓰기 권한, 장시간 메모리 사용을 별도로 확인해야 합니다. 측정 없이 특정 FPS나 지연시간을 보장하지 않습니다.
 
 레이어 ID는 앱 내부의 증가하는 카운터로 만들기 때문에 `crypto.randomUUID()`가 없는 HTTP 접속 환경에서도 드로잉 엔진이 시작됩니다. 단, 서비스 워커 오프라인 실행과 File System Access API는 브라우저의 보안 컨텍스트 정책에 따르므로 HTTPS 또는 localhost가 필요합니다.
+
+연필 브러시 및 종이 가이드의 사용법·재현성·파일 호환성은 [확장 안내](docs/pencil-paper-guides.md)를 참고하세요. 상단에서 기본/진한 연필을 고르고 우측 작업 화면에서 가이드를 설정합니다. 가이드는 PNG에 포함되지 않습니다.
 
 인스타툰 프리셋과 다중 컷 기능, 상주 메모리 정책, version 2 구조 및 다음 단계의 범위는 [인스타툰 기반 설계](docs/instagram-foundation.md)를 참고하세요. 기본 작업 화면은 흰색이며 PNG 내보내기 배경은 별도로 고를 수 있습니다.
