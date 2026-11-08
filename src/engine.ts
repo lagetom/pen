@@ -1,7 +1,11 @@
+// IDs only identify layers inside this module; they are not authentication tokens.
+// A module-wide counter also works on HTTP origins without crypto.randomUUID.
+let nextLayerId = 0;
+function layerId() { return `layer-${++nextLayerId}`; }
 export const TILE = 128;
 export const HISTORY_LIMIT = 128 * 1024 * 1024;
 export type Layer = { id: string; name: string; visible: boolean; opacity: number; canvas: HTMLCanvasElement };
-export type Command = { label: string; bytes: number; undo: () => void; redo: () => void };
+export type Command = { label: string; bytes: number; undo: () => void; redo: () => void; layers?: Layer[] };
 export type Project = { format: 'mini-paint'; version: 1; width: number; height: number; name: string; layers: { name: string; visible: boolean; opacity: number; image: string }[] };
 export function canvas(w: number, h: number) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
 export function ctx(c: HTMLCanvasElement) { return c.getContext('2d', { willReadFrequently: true })!; }
@@ -27,17 +31,17 @@ export class Paint {
   changed = () => {}; render = () => {};
   constructor() { this.reset(1600, 1200); }
   get selected() { return this.layers.find(l => l.id === this.active)!; }
-  makeLayer(name = '레이어') { return { id: crypto.randomUUID(), name, visible: true, opacity: 1, canvas: canvas(this.width, this.height) }; }
+  makeLayer(name = '레이어') { return { id: layerId(), name, visible: true, opacity: 1, canvas: canvas(this.width, this.height) }; }
   reset(w: number, h: number) { dimensions(w, h); this.cancel(); this.width = w; this.height = h; this.layers = [this.makeLayer('레이어 1')]; this.active = this.layers[0].id; this.history.clear(); }
   commit(c: Command) { this.history.push(c); this.changed(); this.render(); }
   structure(label: string, action: () => void, bytes = 0) {
     if (this.stroke) return;
     const before = [...this.layers], oldActive = this.active;
     action(); const after = [...this.layers], newActive = this.active;
-    this.commit({ label, bytes, undo: () => { this.layers = [...before]; this.active = oldActive; }, redo: () => { this.layers = [...after]; this.active = newActive; } });
+    this.commit({ label, bytes, layers: [...new Set([...before, ...after])], undo: () => { this.layers = [...before]; this.active = oldActive; }, redo: () => { this.layers = [...after]; this.active = newActive; } });
   }
   add() {
-    if ((this.layers.length + 1) * this.width * this.height > 128e6 || this.layers.length >= 40) throw new Error('레이어 메모리 한도에 도달했습니다.');
+    if ((this.layers.length + 1) * this.width * this.height > 128e6 || this.layers.length >= 50) throw new Error('레이어 메모리 한도에 도달했습니다.');
     const l = this.makeLayer(`레이어 ${this.layers.length + 1}`);
     this.structure('레이어 추가', () => { this.layers.splice(this.layers.indexOf(this.selected) + 1, 0, l); this.active = l.id; }, this.width * this.height * 4);
   }
@@ -45,7 +49,7 @@ export class Paint {
   move(delta: number) { const i = this.layers.indexOf(this.selected), j = i + delta; if (j < 0 || j >= this.layers.length) return; this.structure('레이어 순서 변경', () => { [this.layers[i], this.layers[j]] = [this.layers[j], this.layers[i]]; }); }
   property<K extends 'name' | 'opacity' | 'visible'>(l: Layer, key: K, value: Layer[K]) {
     if (this.stroke || l[key] === value) return; const before = l[key]; l[key] = value;
-    this.commit({ label: '레이어 속성 변경', bytes: 0, undo: () => { l[key] = before; }, redo: () => { l[key] = value; } });
+    this.commit({ label: '레이어 속성 변경', bytes: 0, layers: [l], undo: () => { l[key] = before; }, redo: () => { l[key] = value; } });
   }
   begin(x: number, y: number, size: number, color: string, opacity: number, erase: boolean) {
     if (this.stroke || !this.selected.visible || this.selected.opacity === 0 || opacity === 0) return false;
@@ -77,22 +81,24 @@ export class Paint {
     s.pending.clear();
   }
   end() {
-    if (!this.stroke) return; this.flush(); const s = this.stroke; this.stroke = null;
+    if (!this.stroke) return; this.flush(); const s = this.stroke, layer = s.layer; this.stroke = null;
     const patches: { x: number; y: number; before: ImageData; after: ImageData }[] = [];
     for (const tile of s.tiles) {
       const [tx, ty] = tile.split(',').map(Number), x = tx * TILE, y = ty * TILE, w = Math.min(TILE, this.width - x), h = Math.min(TILE, this.height - y);
       const before = ctx(s.original).getImageData(x, y, w, h), after = ctx(s.layer.canvas).getImageData(x, y, w, h);
       if (before.data.some((v, i) => v !== after.data[i])) patches.push({ x, y, before, after });
     }
+    // Do not retain full-size stroke buffers through history closures.
+    s.original.width = s.original.height = s.mask.width = s.mask.height = 0;
     if (!patches.length) { this.render(); return; }
-    this.commit({ label: s.erase ? '지우개' : '펜 스트로크', bytes: patches.reduce((n, p) => n + p.before.data.byteLength * 2, 0), undo: () => patches.forEach(p => ctx(s.layer.canvas).putImageData(p.before, p.x, p.y)), redo: () => patches.forEach(p => ctx(s.layer.canvas).putImageData(p.after, p.x, p.y)) });
+    this.commit({ label: s.erase ? '지우개' : '펜 스트로크', layers: [layer], bytes: patches.reduce((n, p) => n + p.before.data.byteLength * 2, 0), undo: () => patches.forEach(p => ctx(layer.canvas).putImageData(p.before, p.x, p.y)), redo: () => patches.forEach(p => ctx(layer.canvas).putImageData(p.after, p.x, p.y)) });
   }
-  cancel() { const s = this.stroke; if (!s) return; const c = ctx(s.layer.canvas); c.clearRect(0, 0, this.width, this.height); c.drawImage(s.original, 0, 0); this.stroke = null; this.render(); }
+  cancel() { const s = this.stroke; if (!s) return; const c = ctx(s.layer.canvas); c.clearRect(0, 0, this.width, this.height); c.drawImage(s.original, 0, 0); s.original.width = s.original.height = s.mask.width = s.mask.height = 0; this.stroke = null; this.render(); }
   clearLayer() {
     if (this.stroke) return; const l = this.selected, before = ctx(l.canvas).getImageData(0, 0, this.width, this.height);
     if (!before.data.some((v, i) => i % 4 === 3 && v)) return;
     ctx(l.canvas).clearRect(0, 0, this.width, this.height);
-    this.commit({ label: '레이어 내용 지우기', bytes: before.data.byteLength, undo: () => ctx(l.canvas).putImageData(before, 0, 0), redo: () => ctx(l.canvas).clearRect(0, 0, this.width, this.height) });
+    this.commit({ label: '레이어 내용 지우기', layers: [l], bytes: before.data.byteLength, undo: () => ctx(l.canvas).putImageData(before, 0, 0), redo: () => ctx(l.canvas).clearRect(0, 0, this.width, this.height) });
   }
   composite(white = false) {
     const out = canvas(this.width, this.height), c = ctx(out);
@@ -100,6 +106,8 @@ export class Paint {
     for (const l of this.layers) if (l.visible) { c.globalAlpha = l.opacity; c.drawImage(l.canvas, 0, 0); }
     c.globalAlpha = 1; return out;
   }
+  referencedLayers() { return [...new Set([...this.layers, ...[...this.history.past, ...this.history.future].flatMap(c => c.layers ?? [])])]; }
+  release() { this.cancel(); for (const l of this.referencedLayers()) l.canvas.width = l.canvas.height = 0; this.history.clear(); this.layers = []; }
   async serialize(name: string): Promise<Project> {
     // Capture all canvases synchronously before yielding so edits cannot mix revisions.
     const copies = this.layers.map(l => ({ name: l.name, visible: l.visible, opacity: l.opacity, copy: (() => { const c = canvas(this.width, this.height); ctx(c).drawImage(l.canvas, 0, 0); return c; })() }));
@@ -113,7 +121,7 @@ export class Paint {
     if (p.version !== undefined && p.version !== 1) throw new Error('지원하지 않는 프로젝트 버전입니다.');
     if (p.format !== undefined && p.format !== 'mini-paint') throw new Error('지원하지 않는 프로젝트 형식입니다.');
     const w = p.width ?? p.canvasWidth, h = p.height ?? p.canvasHeight; dimensions(w, h);
-    if (!Array.isArray(p.layers) || !p.layers.length || p.layers.length > 40 || p.layers.length * w * h > 128e6) throw new Error('레이어 개수 또는 메모리 한도를 초과했습니다.');
+    if (!Array.isArray(p.layers) || !p.layers.length || p.layers.length > 50 || p.layers.length * w * h > 128e6) throw new Error('레이어 개수 또는 메모리 한도를 초과했습니다.');
     const layers: Layer[] = [];
     for (const entry of p.layers) {
       if (!entry || typeof entry !== 'object') throw new Error('잘못된 레이어입니다.');
@@ -124,7 +132,7 @@ export class Paint {
       const img = await loadImage(image);
       if (img.width !== w || img.height !== h) throw new Error('레이어와 캔버스 크기가 다릅니다.');
       const c = canvas(w, h); ctx(c).drawImage(img, 0, 0);
-      layers.push({ id: crypto.randomUUID(), name: String(entry.name ?? '레이어').slice(0, 100), visible: entry.visible !== false, opacity, canvas: c });
+      layers.push({ id: layerId(), name: String(entry.name ?? '레이어').slice(0, 100), visible: entry.visible !== false, opacity, canvas: c });
     }
     return { width: w, height: h, layers, name: typeof p.name === 'string' ? p.name.slice(0, 100) : '제목 없음' };
   }
@@ -132,4 +140,5 @@ export class Paint {
 }
 export function loadImage(src: string): Promise<HTMLImageElement> { return new Promise((resolve, reject) => { const img = new Image(); img.onload = () => resolve(img); img.onerror = () => reject(new Error('이미지를 읽을 수 없습니다.')); img.src = src; }); }
 export function blob(c: HTMLCanvasElement): Promise<Blob> { return new Promise((resolve, reject) => c.toBlob(b => b ? resolve(b) : reject(new Error('이미지 변환에 실패했습니다.')), 'image/png')); }
-async function dataURL(c: HTMLCanvasElement) { const b = await blob(c); return new Promise<string>((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(r.result as string); r.onerror = () => reject(new Error('이미지 직렬화에 실패했습니다.')); r.readAsDataURL(b); }); }
+async function dataURL(c: HTMLCanvasElement) { return blobURL(await blob(c)); }
+export function blobURL(b: Blob) { return new Promise<string>((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(r.result as string); r.onerror = () => reject(new Error('이미지 직렬화에 실패했습니다.')); r.readAsDataURL(b); }); }
