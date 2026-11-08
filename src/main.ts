@@ -1,4 +1,6 @@
 import './style.css';
+import { Storyboard, thumbnailCanvas } from './storyboard';
+import { PRESETS, ratio, readPreset, rememberPreset } from './presets';
 import { Paint, canvas, ctx, loadImage, blob, dimensions, HISTORY_LIMIT } from './engine';
 const icons: Record<string, string> = {
  pen: '<path d="m15 4 5 5M4 20l4-1L20 7a2 2 0 0 0-5-5L3 14l-1 7Z"/>',
@@ -20,21 +22,24 @@ document.querySelector('#app')!.innerHTML = `
 <nav class="filebar" aria-label="파일 도구"><div class="file-actions">${button('new','새 작업','file')}${button('open','열기','folder')}${button('save','저장','save')}<span class="divider"></span>${button('import','이미지 가져오기','image')}</div>${button('export','PNG 내보내기','export','class="export-button"')}</nav>
 <div class="workspace"><aside class="toolrail" aria-label="그리기 도구">${button('pen','펜 (B)','pen','class="tool active" aria-pressed="true"')}${button('eraser','지우개 (E)','eraser','class="tool" aria-pressed="false"')}${button('hand','화면 이동 (H)','hand','class="tool" aria-pressed="false"')}<div class="rail-line"></div><label class="rail-color" title="색상 선택"><input id="color" type="color" value="#283747" aria-label="브러시 색상"></label><button id="resetColor" class="color-reset" title="기본 색상으로 변경"><i></i><i></i></button><div class="rail-bottom">${button('diagnostics','성능 진단','info')}</div></aside>
 <main class="drawing-area"><div class="optionsbar"><strong id="toolLabel">${icon('pen')}펜</strong><span class="divider"></span><label>크기 <input id="size" type="range" min="1" max="100" value="8"><output id="sizeValue">8 <span>px</span></output></label><span class="divider"></span><label>불투명도 <input id="brushOpacity" type="range" min="0" max="100" value="100"><output id="brushOpacityValue">100%</output></label><div class="history-actions">${button('undo','실행 취소 (Ctrl+Z)','undo')}${button('redo','다시 실행 (Ctrl+Y)','redo')}</div></div>
-<div id="stage" tabindex="0" aria-label="그리기 작업 공간"><div class="canvas-label">CANVAS <span id="canvasLabel">1600 × 1200</span></div><div id="paper"><canvas id="view" width="1600" height="1200" aria-label="그림 캔버스"></canvas></div><div id="brushCursor"></div><div class="stage-hint"><kbd>Space</kbd> + 드래그로 이동 <span>·</span> <kbd>Ctrl</kbd> + 휠로 확대</div><div class="zoom-controls">${button('zoomOut','축소','minus')}<button id="zoomValue" title="100%로 보기">100%</button>${button('zoomIn','확대','plus')}<span></span>${button('fit','화면 맞춤 (Ctrl+0)','fit')}</div></div>
+<div id="stage" tabindex="0" aria-label="그리기 작업 공간"><div class="canvas-label">CANVAS <span id="canvasLabel">1600 × 1200</span></div><div id="paper" class="white"><canvas id="view" width="1600" height="1200" aria-label="그림 캔버스"></canvas></div><div id="brushCursor"></div><div class="stage-hint"><kbd>Space</kbd> + 드래그로 이동 <span>·</span> <kbd>Ctrl</kbd> + 휠로 확대</div><div class="zoom-controls">${button('zoomOut','축소','minus')}<button id="zoomValue" title="100%로 보기">100%</button>${button('zoomIn','확대','plus')}<span></span>${button('fit','화면 맞춤 (Ctrl+0)','fit')}</div></div>
+<section class="cut-panel" aria-label="컷 관리"><div class="cut-heading"><strong>컷 <span id="cutCount">1</span></strong><span id="currentCutLabel">컷 1</span><div class="cut-actions">${button('addCut','새 컷','plus')}${button('duplicateCut','컷 복제','layers')}${button('previousLayers','이전 컷 레이어 복제','layers')}${button('cutLeft','컷 앞으로','up')}${button('cutRight','컷 뒤로','down')}${button('renameCut','컷 이름 변경','pen')}${button('deleteCut','컷 삭제','trash')}</div></div><div id="cutList" aria-label="컷 목록"></div></section>
 <footer class="statusbar"><span><i class="status-led"></i><span id="statusText">그릴 준비가 되었어요</span></span><span id="coordinates">—, — px</span><span id="dimensions">1600 × 1200 px</span><span id="autoStatus">자동 저장 대기</span></footer></main>
 <aside class="sidebar"><section class="brush-panel"><div class="section-heading"><h2>브러시</h2><span>기본 원형</span></div><div class="brush-preview"><span id="brushDot"></span><div><strong id="brushName">펜</strong><small>생각이 흐르는 대로, 가볍게.</small></div><span id="brushBadge">8 px</span></div><div class="palette-label">컬러 팔레트 <span id="colorHex">#283747</span></div><div id="palette" class="palette"></div></section>
 <section class="layers-panel"><div class="section-heading"><h2>${icon('layers')}레이어 <span id="layerCount">1</span></h2>${button('addLayer','레이어 추가','plus')}</div><div class="layer-opacity"><label for="layerOpacity">불투명도</label><output id="layerOpacityValue">100%</output><input id="layerOpacity" type="range" min="0" max="100" value="100"></div><div id="layerList" role="list" aria-label="레이어 목록"></div><div class="layer-actions">${button('layerUp','레이어 위로','up')}${button('layerDown','레이어 아래로','down')}<span></span>${button('renameLayer','레이어 이름 변경','pen')}${button('deleteLayer','레이어 삭제','trash')}</div></section>
-<section class="background-panel"><h2>작업 화면</h2><label><span class="checker-icon"></span>흰색 배경으로 보기 <input id="whiteBackground" type="checkbox" role="switch"></label><p>배경은 그림에 저장되지 않아요.</p></section><div class="sidebar-note">작은 아이디어가 시작되는 곳.<span>MAKE A LITTLE SOMETHING.</span></div></aside></div>
+<section class="background-panel"><h2>작업 화면</h2><label><span class="checker-icon"></span>흰색 배경으로 보기 <input id="whiteBackground" type="checkbox" checked role="switch"></label><p>배경은 그림에 저장되지 않아요.</p></section><div class="sidebar-note">작은 아이디어가 시작되는 곳.<span>MAKE A LITTLE SOMETHING.</span></div></aside></div>
 <div id="toast" role="status" hidden></div><input id="fileInput" type="file" accept=".mpaint,.json,application/json" hidden><input id="imageInput" type="file" accept="image/png" hidden>
-<dialog id="newDialog"><form method="dialog"><div class="dialog-icon">${icon('file')}</div><h2>새로운 그림을 시작해요</h2><p>캔버스 크기를 정해주세요. 현재 그림은 먼저 저장하는 것을 권장해요.</p><div class="dimension-fields"><label>가로 <input id="newWidth" type="number" min="1" max="4096" value="1600" required> px</label><span>×</span><label>세로 <input id="newHeight" type="number" min="1" max="4096" value="1200" required> px</label></div><div class="preset-buttons"><button type="button" data-preset="1600,1200">기본 4:3</button><button type="button" data-preset="1920,1080">와이드 16:9</button><button type="button" data-preset="1200,1200">정사각형</button></div><div class="dialog-actions"><button value="cancel">취소</button><button id="createDocument" value="create" class="primary">캔버스 만들기</button></div></form></dialog>
-<dialog id="exportDialog"><form method="dialog"><div class="dialog-icon">${icon('export')}</div><h2>PNG로 내보내기</h2><p>보이는 레이어를 한 장의 이미지로 저장합니다.</p><label class="export-option"><input type="radio" name="exportBg" value="transparent" checked> 투명 배경 <span class="checker-icon"></span></label><label class="export-option"><input type="radio" name="exportBg" value="white"> 흰색 배경</label><div class="dialog-actions"><button value="cancel">취소</button><button id="downloadPng" class="primary" value="export">PNG 저장</button></div></form></dialog>
+<dialog id="newDialog"><form method="dialog"><div class="dialog-icon">${icon('file')}</div><h2>새로운 그림을 시작해요</h2><p>캔버스 크기를 정해주세요. 현재 그림은 먼저 저장하는 것을 권장해요.</p><label class="preset-label" for="canvasPreset">캔버스 프리셋</label><select id="canvasPreset">${PRESETS.map(p=>`<option value="${p.id}">${p.label}</option>`).join('')}<option value="custom">사용자 지정</option></select><div id="newSizeInfo" class="size-info"></div><div class="dimension-fields"><label>가로 <input id="newWidth" type="number" min="1" max="4096" value="1600" required> px</label><span>×</span><label>세로 <input id="newHeight" type="number" min="1" max="4096" value="1200" required> px</label></div><div class="preset-buttons"><button type="button" data-preset="1600,1200">기본 4:3</button><button type="button" data-preset="1920,1080">와이드 16:9</button><button type="button" data-preset="1200,1200">정사각형</button></div><div class="dialog-actions"><button value="cancel">취소</button><button id="createDocument" value="create" class="primary">캔버스 만들기</button></div></form></dialog>
+<dialog id="exportDialog"><form method="dialog"><div class="dialog-icon">${icon('export')}</div><h2>PNG로 내보내기</h2><p>현재 컷의 보이는 레이어를 한 장으로 저장합니다.<br><span id="exportSize"></span></p><label class="export-option"><input type="radio" name="exportBg" value="transparent" checked> 투명 배경 <span class="checker-icon"></span></label><label class="export-option"><input type="radio" name="exportBg" value="white"> 흰색 배경</label><div class="dialog-actions"><button value="cancel">취소</button><button id="downloadPng" class="primary" value="export">PNG 저장</button></div></form></dialog>
 <dialog id="helpDialog"><h2>작게 시작하는 즐거움</h2><p>펜으로 그리거나 이미지를 가져와 자유롭게 편집하세요.<br>레이어 이름은 더블클릭으로 바꿀 수 있어요.</p><dl class="shortcuts"><dt>B / E / H</dt><dd>펜 / 지우개 / 화면 이동</dd><dt>Space + 드래그</dt><dd>화면 이동</dd><dt>[ / ]</dt><dd>브러시 크기</dd><dt>Ctrl + Z / Y</dt><dd>실행 취소 / 다시 실행</dd><dt>Ctrl + Shift + Z</dt><dd>다시 실행</dd><dt>Ctrl + S / Shift + S</dt><dd>저장 / 다른 이름으로 저장</dd><dt>Ctrl + O / N</dt><dd>열기 / 새 작업</dd><dt>Ctrl + + / − / 0</dt><dd>확대 / 축소 / 화면 맞춤</dd><dt>Delete</dt><dd>선택 레이어 내용 지우기</dd></dl><p class="muted">자동 복구는 프로젝트 파일 저장을 대신하지 않습니다.<br>압력 감지·손떨림 보정은 기본적으로 적용하지 않습니다.</p><form method="dialog"><button class="primary">알겠어요</button></form></dialog>
 <dialog id="recoveryDialog"><h2>이전 그림이 기다리고 있어요</h2><p>이 기기에 자동 저장한 작업이 있습니다. 이어서 그릴까요?</p><div class="dialog-actions"><button id="discardRecovery">새로 시작</button><button id="restoreRecovery" class="primary">작업 복구</button></div></dialog>
 <dialog id="diagnosticDialog"><h2>개발자 진단</h2><p>현재 브라우저의 실제 측정값입니다. 입력 지연은 이벤트 처리부터 다음 렌더 완료까지이며, 화면 표시·기기 자체 지연은 포함하지 않습니다.</p><pre id="metrics"></pre><form method="dialog"><button class="primary">닫기</button></form></dialog>`;
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const input = (id: string) => $<HTMLInputElement>(id);
-const app = new Paint(), view = $<HTMLCanvasElement>('view'), paper = $('paper'), stage = $('stage');
+let app = new Paint(), story = new Storyboard(app);
+const view = $<HTMLCanvasElement>('view'), paper = $('paper'), stage = $('stage');
 let tool: 'pen' | 'eraser' | 'hand' = 'pen', size = 8, brushOpacity = 1, color = '#283747';
+let thumbnailDirty = true;
 let zoom = 1, panX = 0, panY = 0, space = false, pointer: number | null = null, panning: { x: number; y: number; panX: number; panY: number } | null = null;
 let name = '제목 없음', revision = 0, savedRevision = 0, autoRevision = 0, documentEpoch = 0;
 let fileHandle: any = null, busy = false, saving = false, pendingFrame = 0, inputAt = 0;
@@ -47,20 +52,26 @@ function safe(action: () => void) { try { if (!busy && pointer === null) action(
 function error(e: unknown) { return e instanceof Error ? e.message : String(e); }
 function render() { if (!pendingFrame) pendingFrame = requestAnimationFrame(draw); }
 function draw() {
-  pendingFrame = 0; const start = performance.now(); app.flush();
+  pendingFrame = 0; if (busy) return; const start = performance.now(); app.flush();
   if (view.width !== app.width || view.height !== app.height) { view.width = app.width; view.height = app.height; }
   const c = ctx(view); c.clearRect(0, 0, view.width, view.height);
   for (const l of app.layers) if (l.visible) { c.globalAlpha = l.opacity; c.drawImage(l.canvas, 0, 0); }
   c.globalAlpha = 1;
+  if (thumbnailDirty && !app.stroke) {
+    const thumb=thumbnailCanvas(app.width,app.height);ctx(thumb).drawImage(view,0,0,thumb.width,thumb.height);
+    story.current.thumbnail=thumb.toDataURL('image/png');thumbnailDirty=false;renderCuts();
+  }
   frames.push(performance.now() - start); if (frames.length > 180) frames.shift();
   if (inputAt) { latencies.push(performance.now() - inputAt); if (latencies.length > 180) latencies.shift(); inputAt = 0; }
 }
-app.render = render;
+function bindEngine() { app = story.paint; app.render = render; app.changed = changed; thumbnailDirty = true; }
+bindEngine();
 function ui() {
+  renderCuts();
   $('docName').textContent = name; $('dirty').hidden = revision === savedRevision;
   ($('undo') as HTMLButtonElement).disabled = !app.history.past.length || busy || pointer !== null;
   ($('redo') as HTMLButtonElement).disabled = !app.history.future.length || busy || pointer !== null;
-  $('layerCount').textContent = String(app.layers.length); $('dimensions').textContent = `${app.width} × ${app.height} px`; $('canvasLabel').textContent = `${app.width} × ${app.height}`;
+  $('layerCount').textContent = String(app.layers.length); $('dimensions').textContent = `${app.width} × ${app.height} px`; $('canvasLabel').textContent = `${app.width} × ${app.height} · ${ratio(app.width,app.height)}`;
   $('layerList').replaceChildren();
   for (const l of [...app.layers].reverse()) {
     const row = document.createElement('div'); row.className = `layer-row ${l.id === app.active ? 'selected' : ''}`; row.setAttribute('role', 'listitem'); row.dataset.layerId = l.id;
@@ -78,8 +89,9 @@ function ui() {
   ($('layerUp') as HTMLButtonElement).disabled = app.layers.indexOf(app.selected) === app.layers.length - 1;
   ($('layerDown') as HTMLButtonElement).disabled = app.layers.indexOf(app.selected) === 0;
 }
-app.changed = () => { revision++; ui(); scheduleAuto(); if (app.history.discarded) notify('히스토리 메모리 한도로 오래된 실행 취소 기록을 정리했습니다.'); };
+function changed() { revision++; thumbnailDirty = true; const trimmed=story.enforceHistoryBudget(); ui(); scheduleAuto(); if (app.history.discarded || trimmed) notify('프로젝트 히스토리 메모리 한도로 오래된 실행 취소 기록을 정리했습니다.'); }
 function transform() {
+  story.current.view = {zoom,panX,panY};
   paper.style.width = `${app.width}px`; paper.style.height = `${app.height}px`; paper.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
   $('zoomValue').textContent = `${Math.round(zoom * 100)}%`; updateCursor();
 }
@@ -105,10 +117,10 @@ function rename(id = app.active) { const l = app.layers.find(l => l.id === id)!;
 $('renameLayer').onclick = () => safe(() => rename());
 input('layerOpacity').oninput = () => { $('layerOpacityValue').textContent = `${input('layerOpacity').value}%`; };
 input('layerOpacity').onchange = () => safe(() => app.property(app.selected, 'opacity', Number(input('layerOpacity').value) / 100));
-input('whiteBackground').onchange = () => paper.classList.toggle('white', input('whiteBackground').checked);
+input('whiteBackground').onchange = () => { story.whiteBackground = input('whiteBackground').checked; paper.classList.toggle('white',story.whiteBackground); revision++; ui(); scheduleAuto(); };
 function dialog(id: string) { if (pointer === null && !busy) $<HTMLDialogElement>(id).showModal(); }
 $('help').onclick = () => dialog('helpDialog');
-$('diagnostics').onclick = () => { const average = (a: number[]) => a.length ? (a.reduce((a, b) => a + b, 0) / a.length).toFixed(2) : '—'; const max = (a: number[]) => a.length ? Math.max(...a).toFixed(2) : '—'; $('metrics').textContent = `캔버스        ${app.width} × ${app.height}\n레이어        ${app.layers.length}\n렌더 표본     ${frames.length}\n렌더 평균     ${average(frames)} ms\n렌더 최대     ${max(frames)} ms\n입력 표본     ${latencies.length}\n입력→렌더 평균 ${average(latencies)} ms\n입력→렌더 최대 ${max(latencies)} ms\n히스토리      ${(app.history.bytes / 1048576).toFixed(2)} / ${HISTORY_LIMIT / 1048576} MiB\nUndo / Redo   ${app.history.past.length} / ${app.history.future.length}\n스트로크 임시 버퍼: 캔버스 2장 (히스토리와 별도)`; dialog('diagnosticDialog'); };
+$('diagnostics').onclick = () => { const average = (a: number[]) => a.length ? (a.reduce((a, b) => a + b, 0) / a.length).toFixed(2) : '—'; const max = (a: number[]) => a.length ? Math.max(...a).toFixed(2) : '—'; $('metrics').textContent = `캔버스        ${app.width} × ${app.height}\n레이어        ${app.layers.length}\n렌더 표본     ${frames.length}\n렌더 평균     ${average(frames)} ms\n렌더 최대     ${max(frames)} ms\n입력 표본     ${latencies.length}\n입력→렌더 평균 ${average(latencies)} ms\n입력→렌더 최대 ${max(latencies)} ms\n히스토리      ${(app.history.bytes / 1048576).toFixed(2)} / ${HISTORY_LIMIT / 1048576} MiB\nUndo / Redo   ${app.history.past.length} / ${app.history.future.length}\n컷 Canvas     ${(story.stats.canvasBytes/1048576).toFixed(2)} MiB\n압축 컷 버퍼   ${(story.stats.compressedBytes/1048576).toFixed(2)} MiB\n상주 컷       ${story.stats.hotCuts} / ${story.stats.cuts}\n전체 히스토리   ${(story.stats.historyBytes/1048576).toFixed(2)} MiB\n스트로크 임시 버퍼: 캔버스 2장 (히스토리와 별도)`; dialog('diagnosticDialog'); };
 stage.addEventListener('pointerdown', e => {
   if ((e.target as Element).closest('button') || pointer !== null || busy || document.querySelector('dialog[open]') || (e.button !== 0 && e.button !== 1)) return;
   const p = coordinates(e); const pan = tool === 'hand' || space || e.button === 1;
@@ -143,8 +155,38 @@ function dirty() { return revision !== savedRevision; }
 function confirmReplace() { return !dirty() || confirm('저장하지 않은 변경 사항이 있습니다. 현재 작업을 바꿀까요?'); }
 function newRequest() { dialog('newDialog'); }
 $('new').onclick = newRequest;
-for (const b of document.querySelectorAll<HTMLButtonElement>('[data-preset]')) b.onclick = () => { const [w, h] = b.dataset.preset!.split(','); input('newWidth').value = w; input('newHeight').value = h; };
-$('createDocument').onclick = e => { e.preventDefault(); safe(() => { const w = Number(input('newWidth').value), h = Number(input('newHeight').value); dimensions(w, h); if (!confirmReplace()) return; app.reset(w, h); name = '제목 없음'; fileHandle = null; documentEpoch++; revision = 0; savedRevision = 0; autoRevision = -1; $<HTMLDialogElement>('newDialog').close(); ui(); fit(); render(); scheduleAuto(); }); };
+function updatePresetInfo() {
+  const w=Number(input('newWidth').value),h=Number(input('newHeight').value);
+  try { dimensions(w,h); $('newSizeInfo').textContent=`${w} × ${h} px · ${ratio(w,h)}`; rememberPreset(($('canvasPreset') as HTMLSelectElement).value,w,h); } catch { $('newSizeInfo').textContent='각 변 1~4096px로 입력하세요.'; }
+}
+const savedPreset=readPreset();input('newWidth').value=String(savedPreset.width);input('newHeight').value=String(savedPreset.height);($('canvasPreset') as HTMLSelectElement).value=savedPreset.id;updatePresetInfo();
+$('canvasPreset').onchange=()=>{const p=PRESETS.find(p=>p.id===($('canvasPreset') as HTMLSelectElement).value);if(p){input('newWidth').value=String(p.width);input('newHeight').value=String(p.height);}updatePresetInfo();};
+for(const id of ['newWidth','newHeight']) input(id).oninput=()=>{($('canvasPreset') as HTMLSelectElement).value='custom';updatePresetInfo();};
+for (const b of document.querySelectorAll<HTMLButtonElement>('[data-preset]')) b.onclick = () => { const [w,h]=b.dataset.preset!.split(',');input('newWidth').value=w;input('newHeight').value=h;($('canvasPreset') as HTMLSelectElement).value=PRESETS.find(p=>p.width===Number(w)&&p.height===Number(h))?.id ?? 'custom';updatePresetInfo(); };
+function restoreView() { const v=story.current.view; if(v){zoom=v.zoom;panX=v.panX;panY=v.panY;transform();}else fit(); }
+function adopt(next: Storyboard) { const old=story;story=next;bindEngine();old.dispose();input('whiteBackground').checked=story.whiteBackground;paper.classList.toggle('white',story.whiteBackground); }
+$('createDocument').onclick = e => { e.preventDefault(); safe(() => { const w=Number(input('newWidth').value),h=Number(input('newHeight').value);dimensions(w,h);if(!confirmReplace())return;const p=new Paint();p.reset(w,h);adopt(new Storyboard(p));name='제목 없음';fileHandle=null;documentEpoch++;revision=0;savedRevision=0;autoRevision=-1;$<HTMLDialogElement>('newDialog').close();ui();fit();render();scheduleAuto(); }); };
+function renderCuts() {
+  $('cutCount').textContent=String(story.cuts.length);$('currentCutLabel').textContent=story.current.name;
+  $('cutList').replaceChildren();
+  for(const [i,cut] of story.cuts.entries()){
+    const b=document.createElement('button');b.className='cut-card';b.dataset.cutId=cut.id;b.setAttribute('aria-pressed',String(cut===story.current));b.title=cut.name;b.disabled=busy || pointer!==null;
+    const image=document.createElement('img');image.alt='';if(cut.thumbnail)image.src=cut.thumbnail;
+    const text=document.createElement('span');text.textContent=`${String(i+1).padStart(2,'0')}  ${cut.name}`;b.append(image,text);
+    b.onclick=()=>void cutAction(async()=>story.select(cut.id),cut!==story.current);$('cutList').append(b);
+  }
+  const i=story.cuts.indexOf(story.current);
+  for(const id of ['addCut','duplicateCut','renameCut','deleteCut','previousLayers','cutLeft','cutRight']) ($<HTMLButtonElement>(id)).disabled=busy || pointer!==null;
+  if(story.cuts.length<=1) $<HTMLButtonElement>('deleteCut').disabled=true;
+  if(i===0){$<HTMLButtonElement>('cutLeft').disabled=true;$<HTMLButtonElement>('previousLayers').disabled=true;}
+  if(i===story.cuts.length-1)$<HTMLButtonElement>('cutRight').disabled=true;
+}
+async function cutAction(action:()=>Promise<void>, edited=true) { await exclusive(async()=>{try { await action(); } finally { bindEngine(); restoreView(); } if(edited){revision++;scheduleAuto();}}); }
+$('addCut').onclick=()=>void cutAction(()=>story.add());$('duplicateCut').onclick=()=>void cutAction(()=>story.add(true));
+$('deleteCut').onclick=()=>{if(!busy && pointer===null && confirm(`“${story.current.name}” 컷을 삭제할까요? 컷 삭제는 실행 취소할 수 없습니다.`))void cutAction(()=>story.remove());};
+$('cutLeft').onclick=()=>void cutAction(()=>story.move(-1));$('cutRight').onclick=()=>void cutAction(()=>story.move(1));
+$('previousLayers').onclick=()=>void cutAction(()=>story.copyPreviousLayers(),false);
+$('renameCut').onclick=()=>safe(()=>{const value=prompt('컷 이름',story.current.name);if(value?.trim()){story.current.name=value.trim().slice(0,100);revision++;ui();scheduleAuto();}});
 function openRequest() { if (pointer === null && !busy) input('fileInput').click(); }
 $('open').onclick = openRequest; $('import').onclick = () => { if (pointer === null && !busy) input('imageInput').click(); };
 async function readFile(file: File) {
@@ -152,7 +194,7 @@ async function readFile(file: File) {
   return file.text();
 }
 async function exclusive(action: () => Promise<void>) { if (busy || pointer !== null) return; busy = true; ui(); try { await action(); } catch (e) { notify(error(e)); } finally { busy = false; ui(); render(); } }
-input('fileInput').onchange = () => { const file = input('fileInput').files?.[0]; input('fileInput').value = ''; if (!file) return; void exclusive(async () => { const decoded = await app.decode(JSON.parse(await readFile(file))); if (!confirmReplace()) return; app.load(decoded); name = decoded.name === '제목 없음' ? file.name.replace(/\.(mpaint|json)$/i, '') : decoded.name; fileHandle = null; documentEpoch++; revision = savedRevision = 0; autoRevision = -1; fit(); scheduleAuto(); notify('프로젝트를 열었습니다. 저장은 새 파일로 진행됩니다.'); }); };
+input('fileInput').onchange = () => { const file = input('fileInput').files?.[0]; input('fileInput').value = ''; if (!file) return; void exclusive(async () => { const decoded = await Storyboard.decode(JSON.parse(await readFile(file))); if (!confirmReplace()) { decoded.story.dispose(); return; } adopt(decoded.story); name = decoded.name === '제목 없음' ? file.name.replace(/\.(mpaint|json)$/i, '') : decoded.name; fileHandle = null; documentEpoch++; revision = savedRevision = 0; autoRevision = -1; restoreView(); scheduleAuto(); notify('프로젝트를 열었습니다. 저장은 새 파일로 진행됩니다.'); }); };
 input('imageInput').onchange = () => { const file = input('imageInput').files?.[0]; input('imageInput').value = ''; if (!file) return; void exclusive(async () => {
   if (file.type !== 'image/png' || file.size > 64 * 1048576) throw new Error('64 MiB 이하의 PNG 파일을 선택하세요.');
   if ((app.layers.length + 1) * app.width * app.height > 128e6 || app.layers.length >= 50) throw new Error('레이어 메모리 한도에 도달했습니다.');
@@ -173,7 +215,7 @@ async function save(as = false) {
     } else if (as || name === '제목 없음') { const value = prompt('프로젝트 파일 이름', name === '제목 없음' ? '나의 그림' : name); if (!value?.trim()) return; nextName = value.trim().replace(/[\\/:*?"<>|]/g, '_').slice(0, 100); }
     // New/open operations are blocked while choosing and capturing the save revision.
     if (documentEpoch !== epoch || revision !== startRevision) { notify('저장 준비 중 그림이 변경되었습니다. 다시 저장해주세요.'); return; }
-    const project = await app.serialize(nextName); const data = new Blob([JSON.stringify(project)], { type: 'application/json' });
+    const project = await story.serialize(nextName); const data = new Blob([JSON.stringify(project)], { type: 'application/json' }); if(data.size>128*1048576)throw new Error('프로젝트 파일이 128 MiB 한도를 초과합니다.');
     if (handle) { const writable = await handle.createWritable(); try { await writable.write(data); await writable.close(); } catch (e) { await writable.abort().catch(() => {}); throw e; } }
     else download(data, `${nextName}.mpaint`);
     if (documentEpoch === epoch) { name = nextName; fileHandle = handle; savedRevision = startRevision; ui(); }
@@ -181,7 +223,7 @@ async function save(as = false) {
   } catch (e) { if ((e as DOMException).name !== 'AbortError') notify(`저장하지 못했습니다: ${error(e)}. 다른 이름으로 저장을 시도하세요.`); }
   finally { saving = false; }
 }
-$('save').onclick = () => void save(); $('export').onclick = () => dialog('exportDialog');
+$('save').onclick = () => void save(); $('export').onclick = () => { $('exportSize').textContent=`${story.current.name} · ${app.width} × ${app.height} px · ${ratio(app.width,app.height)}`; dialog('exportDialog'); };
 $('downloadPng').onclick = e => { e.preventDefault(); $<HTMLDialogElement>('exportDialog').close(); void exclusive(async () => { const white = document.querySelector<HTMLInputElement>('input[name="exportBg"]:checked')!.value === 'white'; download(await blob(app.composite(white)), `${name}.png`); notify('PNG 다운로드를 요청했습니다.'); }); };
 window.addEventListener('keydown', e => {
   if (e.isComposing || e.altKey || document.querySelector('dialog[open]')) return;
@@ -219,7 +261,7 @@ async function autosave() {
   if (!db) return;
   if (autoWriting || busy || pointer !== null) { autoTimer = setTimeout(() => void autosave(), 1200); return; }
   autoWriting = true; const version = revision, epoch = documentEpoch; $('autoStatus').textContent = '자동 저장 중…';
-  try { const project = await app.serialize(name); if (epoch !== documentEpoch) return; await dbRequest('readwrite', { project, at: Date.now() });
+  try { const project = await story.serialize(name); if (epoch !== documentEpoch) return; await dbRequest('readwrite', { project, at: Date.now() });
     if (epoch === documentEpoch) { autoRevision = version; $('autoStatus').textContent = revision === version ? '자동 저장 완료' : '자동 저장 대기'; }
   } catch (e) { autoFailed = true; $('autoStatus').textContent = '자동 저장 실패'; notify(`자동 저장 실패: ${error(e)}. 프로젝트 파일을 직접 저장해주세요.`); }
   finally { autoWriting = false; if (!autoFailed && autoRevision !== revision) scheduleAuto(); }
@@ -233,7 +275,7 @@ async function initRecovery() {
     // Do not offer late recovery after the user has already started editing.
     if (revision || pointer !== null) return;
     $<HTMLDialogElement>('recoveryDialog').showModal();
-    $('restoreRecovery').onclick = () => { $<HTMLDialogElement>('recoveryDialog').close(); void exclusive(async () => { const p = await app.decode(recovery.project); app.load(p); name = p.name; fileHandle = null; documentEpoch++; revision = 1; savedRevision = 0; autoRevision = 1; fit(); notify('작업을 복구했습니다. 프로젝트 파일로도 저장해주세요.'); }); };
+    $('restoreRecovery').onclick = () => { $<HTMLDialogElement>('recoveryDialog').close(); void exclusive(async () => { const p = await Storyboard.decode(recovery.project); adopt(p.story); name = p.name; fileHandle = null; documentEpoch++; revision = 1; savedRevision = 0; autoRevision = 1; restoreView(); notify('작업을 복구했습니다. 프로젝트 파일로도 저장해주세요.'); }); };
     $('discardRecovery').onclick = () => { $<HTMLDialogElement>('recoveryDialog').close(); autoRevision = -1; scheduleAuto(); };
     $<HTMLDialogElement>('recoveryDialog').addEventListener('cancel', e => e.preventDefault());
   } catch (e) { $('autoStatus').textContent = '자동 저장 사용 불가'; notify(`자동 복구를 사용할 수 없습니다: ${error(e)}. 파일 저장을 이용하세요.`); }
@@ -242,4 +284,4 @@ ui(); fit(); render(); void initRecovery();
 new ResizeObserver(() => { transform(); }).observe(stage);
 if ('serviceWorker' in navigator && import.meta.env.PROD) navigator.serviceWorker.register('/sw.js').catch(() => notify('오프라인 캐시를 준비하지 못했습니다. 온라인에서 다시 열어주세요.'));
 // Development diagnostics and deterministic browser regression tests only; excluded from production.
-if (import.meta.env.DEV) (window as any).__paint = { app, get revision() { return revision; }, get zoom() { return zoom; }, setZoom, coordinates, autosave, get metrics() { return { frames, latencies }; } };
+if (import.meta.env.DEV) (window as any).__paint = { get app() { return app; }, get story() { return story; }, get busy() { return busy; }, get revision() { return revision; }, get zoom() { return zoom; }, setZoom, coordinates, autosave, get metrics() { return { frames, latencies }; } };
