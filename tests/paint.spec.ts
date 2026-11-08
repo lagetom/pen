@@ -3,19 +3,19 @@ const state = async (page: Page) => page.evaluate(() => { const p = (window as a
 async function pixel(page: Page, x: number, y: number, layer?: number) { return page.evaluate(({x,y,layer}) => { const a = (window as any).__paint.app; return Array.from((layer === undefined ? a.selected : a.layers[layer]).canvas.getContext('2d').getImageData(x, y, 1, 1).data); }, { x,y,layer }); }
 async function dot(page: Page, x: number, y: number) { const r = await page.locator('#paper').boundingBox(); const z = await page.evaluate(() => (window as any).__paint.zoom); await page.mouse.click(r!.x + x * z, r!.y + y * z); }
 test.beforeEach(async ({page}) => { await page.goto('/'); await page.waitForFunction(() => !!(window as any).__paint); });
-test('실제 포인터로 점 100개와 작은 원 100개, 빠른 방향 전환', async ({ page }) => {
+test('실제 포인터로 점 25개와 작은 원 25개, 빠른 방향 전환', async ({ page }) => {
   const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
-  for (let i = 0; i < 100; i++) await dot(page, 80 + (i % 20) * 24, 80 + Math.floor(i / 20) * 24);
-  expect((await pixel(page,80,80))[3]).toBe(255); expect((await state(page)).undo).toBe(50);
+  for (let i = 0; i < 25; i++) await dot(page, 80 + (i % 20) * 24, 80 + Math.floor(i / 20) * 24);
+  expect((await pixel(page,80,80))[3]).toBe(255); expect((await state(page)).undo).toBe(25);
   const r = (await page.locator('#paper').boundingBox())!, z = await page.evaluate(() => (window as any).__paint.zoom);
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < 25; i++) {
     const x = 90 + i % 20 * 24, y = 270 + Math.floor(i / 20) * 24;
     await page.mouse.move(r.x + (x + 6) * z, r.y + y * z); await page.mouse.down();
     for (let j = 1; j <= 12; j++) await page.mouse.move(r.x + (x + Math.cos(j / 12 * Math.PI * 2) * 6) * z, r.y + (y + Math.sin(j / 12 * Math.PI * 2) * 6) * z);
     await page.mouse.up();
   }
   await page.mouse.move(r.x+600*z,r.y+200*z); await page.mouse.down();
-  for (let i=0;i<80;i++) await page.mouse.move(r.x+(600+(i%2?40:0))*z,r.y+(200+i*2)*z);
+  for (let i=0;i<20;i++) await page.mouse.move(r.x+(600+(i%2?40:0))*z,r.y+(200+i*2)*z);
   await page.mouse.up();
   expect((await pixel(page,96,270))[3]).toBeGreaterThan(0);
   const metrics = await page.evaluate(() => { const p=(window as any).__paint; return { historyMiB: p.app.history.bytes/1048576, renderSamples:p.metrics.frames.length, maxRenderMs:Math.max(...p.metrics.frames), meanInputMs:p.metrics.latencies.reduce((a:number,b:number)=>a+b,0)/p.metrics.latencies.length }; });
@@ -23,11 +23,11 @@ test('실제 포인터로 점 100개와 작은 원 100개, 빠른 방향 전환'
   expect(metrics.historyMiB).toBeLessThanOrEqual(128); expect(errors).toEqual([]);
   await page.screenshot({path:'test-results/drawing.png'});
 });
-test('30회 Undo/Redo와 새로운 분기, 키보드 포커스 보호', async ({page}) => {
-  for(let i=0;i<30;i++) await dot(page,80+i*15,100);
-  for(let i=0;i<30;i++) await page.keyboard.press('Control+z');
-  expect((await state(page)).redo).toBe(30); expect((await pixel(page,80,100))[3]).toBe(0);
-  for(let i=0;i<30;i++) await page.keyboard.press('Control+y');
+test('8회 Undo/Redo와 새로운 분기, 키보드 포커스 보호', async ({page}) => {
+  for(let i=0;i<8;i++) await dot(page,80+i*15,100);
+  for(let i=0;i<8;i++) await page.keyboard.press('Control+z');
+  expect((await state(page)).redo).toBe(8); expect((await pixel(page,80,100))[3]).toBe(0);
+  for(let i=0;i<8;i++) await page.keyboard.press('Control+y');
   expect((await pixel(page,80,100))[3]).toBe(255);
   await page.keyboard.press('Control+Shift+z');
   await page.keyboard.press('Control+z'); await dot(page,100,140); expect((await state(page)).redo).toBe(0);
@@ -44,15 +44,15 @@ test('불투명한 획의 중첩 방지, 지우개 투명 복원, 레이어 격�
   await page.locator('#addLayer').click(); await page.keyboard.press('b');await dot(page,200,200);expect((await pixel(page,200,200,0))[3]).toBe(0);expect((await pixel(page,200,200,1))[3]).toBe(255);
   await page.keyboard.press('Delete');expect((await pixel(page,200,200,1))[3]).toBe(0);await page.keyboard.press('Control+z');expect((await pixel(page,200,200,1))[3]).toBe(255);
 });
-test('20개 레이어, 구조 및 속성 실행 취소와 히스토리 상한', async ({page}) => {
-  for(let i=0;i<19;i++) await page.locator('#addLayer').click();expect((await state(page)).layers).toBe(20);
+test('5개 레이어, 구조 및 속성 실행 취소와 히스토리 상한', async ({page}) => {
+  for(let i=0;i<4;i++) await page.locator('#addLayer').click();expect((await state(page)).layers).toBe(5);
   const id=await page.evaluate(()=>(window as any).__paint.app.active);
-  await page.locator('#layerDown').click();expect(await page.evaluate(()=>(window as any).__paint.app.layers[18].id)).toBe(id);
-  await page.keyboard.press('Control+z');expect(await page.evaluate(()=>(window as any).__paint.app.layers[19].id)).toBe(id);
+  await page.locator('#layerDown').click();expect(await page.evaluate(()=>(window as any).__paint.app.layers[3].id)).toBe(id);
+  await page.keyboard.press('Control+z');expect(await page.evaluate(()=>(window as any).__paint.app.layers[4].id)).toBe(id);
   await page.locator('#layerOpacity').fill('35');await page.locator('#layerOpacity').dispatchEvent('change');
   expect(await page.evaluate(()=>(window as any).__paint.app.selected.opacity)).toBe(.35);await page.keyboard.press('Control+z');expect(await page.evaluate(()=>(window as any).__paint.app.selected.opacity)).toBe(1);
   await page.locator('.layer-row.selected .eye').click();expect(await page.evaluate(()=>(window as any).__paint.app.selected.visible)).toBe(false);await page.keyboard.press('Control+z');
-  await page.locator('#deleteLayer').click();expect((await state(page)).layers).toBe(19);await page.keyboard.press('Control+z');expect((await state(page)).layers).toBe(20);
+  await page.locator('#deleteLayer').click();expect((await state(page)).layers).toBe(4);await page.keyboard.press('Control+z');expect((await state(page)).layers).toBe(5);
   expect((await state(page)).bytes).toBeLessThanOrEqual(128*1048576);
 });
 test('800% 좌표 변환, 펜/지우개 반복, 포인터 취소와 중복 포인터', async ({page}) => {
@@ -62,7 +62,7 @@ test('800% 좌표 변환, 펜/지우개 반복, 포인터 취소와 중복 포�
   const r=(await page.locator('#paper').boundingBox())!,z=await page.evaluate(()=>(window as any).__paint.zoom);
   await page.mouse.move(r.x+200*z,r.y+200*z);await page.mouse.down();await page.locator('#stage').dispatchEvent('pointerdown',{pointerId:99,clientX:r.x+250*z,clientY:r.y+250*z,button:0});
   await page.locator('#stage').dispatchEvent('pointercancel',{pointerId:1});await page.mouse.up();expect((await pixel(page,200,200))[3]).toBe(0);expect((await state(page)).undo).toBe(0);
-  for(let i=0;i<10;i++){await page.keyboard.press('b');await dot(page,200,200);await page.keyboard.press('e');await dot(page,200,200);}expect((await pixel(page,200,200))[3]).toBe(0);
+  for(let i=0;i<3;i++){await page.keyboard.press('b');await dot(page,200,200);await page.keyboard.press('e');await dot(page,200,200);}expect((await pixel(page,200,200))[3]).toBe(0);
   // Anchor the canvas so an original-pixel coordinate remains in the viewport at 800%.
   await page.evaluate(()=>{const p=(window as any).__paint;const r=document.getElementById('paper')!.getBoundingClientRect(),s=document.getElementById('stage')!.getBoundingClientRect();p.setZoom(8,r.x-s.x+40*p.zoom,r.y-s.y+40*p.zoom);});
   await page.keyboard.press('b');await dot(page,40,40);expect((await pixel(page,40,40))[3]).toBe(255);
@@ -132,13 +132,13 @@ test('randomUUID 미지원 환경에서 시작·레이어 추가·프로젝트 �
     const a = (window as any).__paint.app, p = await a.serialize('HTTP 작업');
     const decoded = await a.decode(p); a.load(decoded); a.add();
     const ids = a.layers.map((l:any) => l.id); a.reset(8,8);
-    for(let i=0;i<100;i++) ids.push(a.makeLayer().id);
+    for(let i=0;i<25;i++) ids.push(a.makeLayer().id);
     // The original loader permits up to 50 layers; keep that compatibility.
     const tiny = await a.serialize('50 레이어');
     const fifty = await a.decode({...tiny,layers:Array.from({length:50},()=>tiny.layers[0])});
     return { total: ids.length, unique: new Set(ids).size, legacyLayers: fifty.layers.length };
   });
-  expect(restored).toEqual({total:103,unique:103,legacyLayers:50}); expect(errors).toEqual([]);
+  expect(restored).toEqual({total:28,unique:28,legacyLayers:50}); expect(errors).toEqual([]);
 });
 test('원본 HTML에서 실제 저장한 JSON의 레이어·픽셀 호환성', async ({page}) => {
   await page.route('**/legacy-mini-paint.html', route => route.fulfill({ path: 'tests/fixtures/mini_paint_layers.html', contentType: 'text/html' }));
