@@ -1,3 +1,5 @@
+import { PencilStroke, type PencilKind } from './pencil';
+import { defaultGuide, readGuide, type GuideSettings } from './guides';
 // IDs only identify layers inside this module; they are not authentication tokens.
 // A module-wide counter also works on HTTP origins without crypto.randomUUID.
 let nextLayerId = 0;
@@ -6,7 +8,7 @@ export const TILE = 128;
 export const HISTORY_LIMIT = 128 * 1024 * 1024;
 export type Layer = { id: string; name: string; visible: boolean; opacity: number; canvas: HTMLCanvasElement };
 export type Command = { label: string; bytes: number; undo: () => void; redo: () => void };
-export type Project = { format: 'mini-paint'; version: 1; width: number; height: number; name: string; layers: { name: string; visible: boolean; opacity: number; image: string }[] };
+export type Project = { format: 'mini-paint'; version: 1; width: number; height: number; name: string; guide?: GuideSettings; layers: { name: string; visible: boolean; opacity: number; image: string }[] };
 export function canvas(w: number, h: number) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
 export function ctx(c: HTMLCanvasElement) { return c.getContext('2d', { willReadFrequently: true })!; }
 export function dimensions(w: number, h: number) {
@@ -26,13 +28,14 @@ export class History {
   clear() { this.past = []; this.future = []; this.bytes = 0; }
 }
 export class Paint {
+  guide = defaultGuide();
   width = 1600; height = 1200; layers: Layer[] = []; active = ''; history = new History();
-  stroke: null | { layer: Layer; original: HTMLCanvasElement; mask: HTMLCanvasElement; x: number; y: number; size: number; color: string; opacity: number; erase: boolean; tiles: Set<string>; pending: Set<string> } = null;
+  stroke: null | { layer: Layer; original: HTMLCanvasElement; mask: HTMLCanvasElement; x: number; y: number; size: number; color: string; opacity: number; erase: boolean; pencil: PencilStroke | null; tiles: Set<string>; pending: Set<string> } = null;
   changed = () => {}; render = () => {};
   constructor() { this.reset(1600, 1200); }
   get selected() { return this.layers.find(l => l.id === this.active)!; }
   makeLayer(name = '레이어') { return { id: layerId(), name, visible: true, opacity: 1, canvas: canvas(this.width, this.height) }; }
-  reset(w: number, h: number) { dimensions(w, h); this.cancel(); this.width = w; this.height = h; this.layers = [this.makeLayer('레이어 1')]; this.active = this.layers[0].id; this.history.clear(); }
+  reset(w: number, h: number) { dimensions(w, h); this.cancel(); this.width = w; this.height = h; this.guide = defaultGuide(); this.layers = [this.makeLayer('레이어 1')]; this.active = this.layers[0].id; this.history.clear(); }
   commit(c: Command) { this.history.push(c); this.changed(); this.render(); }
   structure(label: string, action: () => void, bytes = 0) {
     if (this.stroke) return;
@@ -51,17 +54,20 @@ export class Paint {
     if (this.stroke || l[key] === value) return; const before = l[key]; l[key] = value;
     this.commit({ label: '레이어 속성 변경', bytes: 0, undo: () => { l[key] = before; }, redo: () => { l[key] = value; } });
   }
-  begin(x: number, y: number, size: number, color: string, opacity: number, erase: boolean) {
+  begin(x: number, y: number, size: number, color: string, opacity: number, erase: boolean, pencil: PencilKind | null = null) {
     if (this.stroke || !this.selected.visible || this.selected.opacity === 0 || opacity === 0) return false;
     const original = canvas(this.width, this.height); ctx(original).drawImage(this.selected.canvas, 0, 0);
-    this.stroke = { layer: this.selected, original, mask: canvas(this.width, this.height), x, y, size, color, opacity, erase, tiles: new Set(), pending: new Set() };
+    const mask = canvas(this.width, this.height);
+    this.stroke = { layer: this.selected, original, mask, pencil: pencil && !erase ? new PencilStroke(ctx(mask), x, y, size, pencil, color) : null, x, y, size, color, opacity, erase, tiles: new Set(), pending: new Set() };
     this.point(x, y, true); return true;
   }
   point(x: number, y: number, dot = false) {
     const s = this.stroke; if (!s || !Number.isFinite(x + y)) return;
-    const m = ctx(s.mask); m.fillStyle = m.strokeStyle = s.color; m.lineWidth = s.size; m.lineCap = m.lineJoin = 'round';
-    if (dot) { m.beginPath(); m.arc(x, y, s.size / 2, 0, Math.PI * 2); m.fill(); }
-    else if (x !== s.x || y !== s.y) { m.beginPath(); m.moveTo(s.x, s.y); m.lineTo(x, y); m.stroke(); }
+    if (s.pencil) { if (!dot) s.pencil.point(x, y); } else {
+      const m = ctx(s.mask); m.fillStyle = m.strokeStyle = s.color; m.lineWidth = s.size; m.lineCap = m.lineJoin = 'round';
+      if (dot) { m.beginPath(); m.arc(x, y, s.size / 2, 0, Math.PI * 2); m.fill(); }
+      else if (x !== s.x || y !== s.y) { m.beginPath(); m.moveTo(s.x, s.y); m.lineTo(x, y); m.stroke(); }
+    }
     const r = s.size / 2 + 2;
     const left = Math.max(0, Math.floor((Math.min(x, s.x) - r) / TILE)), top = Math.max(0, Math.floor((Math.min(y, s.y) - r) / TILE));
     const right = Math.min(Math.ceil(this.width / TILE) - 1, Math.floor((Math.max(x, s.x) + r) / TILE)), bottom = Math.min(Math.ceil(this.height / TILE) - 1, Math.floor((Math.max(y, s.y) + r) / TILE));
@@ -81,17 +87,18 @@ export class Paint {
     s.pending.clear();
   }
   end() {
-    if (!this.stroke) return; this.flush(); const s = this.stroke; this.stroke = null;
+    if (!this.stroke) return; this.flush(); const s = this.stroke, layer = s.layer; this.stroke = null;
     const patches: { x: number; y: number; before: ImageData; after: ImageData }[] = [];
     for (const tile of s.tiles) {
       const [tx, ty] = tile.split(',').map(Number), x = tx * TILE, y = ty * TILE, w = Math.min(TILE, this.width - x), h = Math.min(TILE, this.height - y);
       const before = ctx(s.original).getImageData(x, y, w, h), after = ctx(s.layer.canvas).getImageData(x, y, w, h);
       if (before.data.some((v, i) => v !== after.data[i])) patches.push({ x, y, before, after });
     }
+    s.original.width = s.original.height = s.mask.width = s.mask.height = 0;
     if (!patches.length) { this.render(); return; }
-    this.commit({ label: s.erase ? '지우개' : '펜 스트로크', bytes: patches.reduce((n, p) => n + p.before.data.byteLength * 2, 0), undo: () => patches.forEach(p => ctx(s.layer.canvas).putImageData(p.before, p.x, p.y)), redo: () => patches.forEach(p => ctx(s.layer.canvas).putImageData(p.after, p.x, p.y)) });
+    this.commit({ label: s.erase ? '지우개' : s.pencil ? '연필 스트로크' : '펜 스트로크', bytes: patches.reduce((n, p) => n + p.before.data.byteLength * 2, 0), undo: () => patches.forEach(p => ctx(layer.canvas).putImageData(p.before, p.x, p.y)), redo: () => patches.forEach(p => ctx(layer.canvas).putImageData(p.after, p.x, p.y)) });
   }
-  cancel() { const s = this.stroke; if (!s) return; const c = ctx(s.layer.canvas); c.clearRect(0, 0, this.width, this.height); c.drawImage(s.original, 0, 0); this.stroke = null; this.render(); }
+  cancel() { const s = this.stroke; if (!s) return; const c = ctx(s.layer.canvas); c.clearRect(0, 0, this.width, this.height); c.drawImage(s.original, 0, 0); s.original.width = s.original.height = s.mask.width = s.mask.height = 0; this.stroke = null; this.render(); }
   clearLayer() {
     if (this.stroke) return; const l = this.selected, before = ctx(l.canvas).getImageData(0, 0, this.width, this.height);
     if (!before.data.some((v, i) => i % 4 === 3 && v)) return;
@@ -107,15 +114,16 @@ export class Paint {
   async serialize(name: string): Promise<Project> {
     // Capture all canvases synchronously before yielding so edits cannot mix revisions.
     const copies = this.layers.map(l => ({ name: l.name, visible: l.visible, opacity: l.opacity, copy: (() => { const c = canvas(this.width, this.height); ctx(c).drawImage(l.canvas, 0, 0); return c; })() }));
-    const width = this.width, height = this.height;
+    const width = this.width, height = this.height, guide = {...this.guide};
     const layers = await Promise.all(copies.map(async l => ({ name: l.name, visible: l.visible, opacity: l.opacity, image: await dataURL(l.copy) })));
-    return { format: 'mini-paint', version: 1, name, width, height, layers };
+    return { format: 'mini-paint', version: 1, name, width, height, guide, layers };
   }
   async decode(raw: unknown) {
     if (!raw || typeof raw !== 'object') throw new Error('올바른 프로젝트 파일이 아닙니다.');
     const p = raw as Record<string, any>;
     if (p.version !== undefined && p.version !== 1) throw new Error('지원하지 않는 프로젝트 버전입니다.');
     if (p.format !== undefined && p.format !== 'mini-paint') throw new Error('지원하지 않는 프로젝트 형식입니다.');
+    const guide = readGuide(p.guide);
     const w = p.width ?? p.canvasWidth, h = p.height ?? p.canvasHeight; dimensions(w, h);
     if (!Array.isArray(p.layers) || !p.layers.length || p.layers.length > 50 || p.layers.length * w * h > 128e6) throw new Error('레이어 개수 또는 메모리 한도를 초과했습니다.');
     const layers: Layer[] = [];
@@ -130,9 +138,9 @@ export class Paint {
       const c = canvas(w, h); ctx(c).drawImage(img, 0, 0);
       layers.push({ id: layerId(), name: String(entry.name ?? '레이어').slice(0, 100), visible: entry.visible !== false, opacity, canvas: c });
     }
-    return { width: w, height: h, layers, name: typeof p.name === 'string' ? p.name.slice(0, 100) : '제목 없음' };
+    return { width: w, height: h, layers, guide, name: typeof p.name === 'string' ? p.name.slice(0, 100) : '제목 없음' };
   }
-  load(p: Awaited<ReturnType<Paint['decode']>>) { this.cancel(); this.width = p.width; this.height = p.height; this.layers = p.layers; this.active = p.layers.at(-1)!.id; this.history.clear(); }
+  load(p: Awaited<ReturnType<Paint['decode']>>) { this.cancel(); this.width = p.width; this.height = p.height; this.guide = {...p.guide}; this.layers = p.layers; this.active = p.layers.at(-1)!.id; this.history.clear(); }
 }
 export function loadImage(src: string): Promise<HTMLImageElement> { return new Promise((resolve, reject) => { const img = new Image(); img.onload = () => resolve(img); img.onerror = () => reject(new Error('이미지를 읽을 수 없습니다.')); img.src = src; }); }
 export function blob(c: HTMLCanvasElement): Promise<Blob> { return new Promise((resolve, reject) => c.toBlob(b => b ? resolve(b) : reject(new Error('이미지 변환에 실패했습니다.')), 'image/png')); }
