@@ -25,6 +25,10 @@ self.addEventListener('fetch', event => {
       catch { return (await cache.match(new URL('./', self.registration.scope))) || Response.error(); }
     }
     // Only same-origin static files are cached; ignore the dev preview server’s Vary: Origin.
-    return (await cache.match(event.request, { ignoreVary: true })) || fetch(event.request);
+    const cached=await cache.match(event.request,{ignoreVary:true});
+    if(cached)return cached;
+    const response=await fetch(event.request);
+    if(response.ok && /\/assets\/[^/]+\.(js|css)$/.test(new URL(event.request.url).pathname)) await cache.put(event.request,response.clone());
+    return response;
   })());
 });

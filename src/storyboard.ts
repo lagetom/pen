@@ -1,10 +1,11 @@
+import { readDpi } from './resolution';
 import { Paint, canvas, ctx, blob, blobURL, loadImage, dimensions, HISTORY_LIMIT, type Layer, type Project } from './engine';
 export const MAX_CUTS = 30;
 export const HOT_PIXELS = 32_000_000;
 export type View = { zoom: number; panX: number; panY: number };
 type Frozen = { layer: Layer; image: Blob };
 export type Cut = { id: string; name: string; paint: Paint; cold: Frozen[] | null; thumbnail: string; view: View | null };
-export type ProjectV2 = { format: 'mini-paint'; version: 2; name: string; width: number; height: number; activeCut: string; whiteBackground: boolean; cuts: { id: string; name: string; layers: Project['layers']; guide?: Project['guide']; activeLayer: number; view: View | null }[] };
+export type ProjectV2 = { format: 'mini-paint'; version: 2; name: string; dpi?: number; width: number; height: number; activeCut: string; whiteBackground: boolean; cuts: { id: string; name: string; layers: Project['layers']; guide?: Project['guide']; activeLayer: number; view: View | null }[] };
 let sequence = 0;
 function makeCut(paint: Paint, name: string): Cut { return { id: `cut-${++sequence}`, name, paint, cold: null, thumbnail: '', view: null }; }
 export function thumbnailCanvas(width: number, height: number) {
@@ -17,8 +18,8 @@ function preview(paint: Paint) {
   return c.toDataURL('image/png');
 }
 export class Storyboard {
-  cuts: Cut[]; current: Cut; whiteBackground = true;
-  constructor(paint = new Paint()) { this.current = makeCut(paint, '컷 1'); this.cuts = [this.current]; }
+  dpi = 96; cuts: Cut[]; current: Cut; whiteBackground = true;
+  constructor(paint = new Paint()) { this.dpi=paint.dpi; this.current = makeCut(paint, '컷 1'); this.cuts = [this.current]; }
   get paint() { return this.current.paint; }
   get width() { return this.paint.width; }
   get height() { return this.paint.height; }
@@ -81,6 +82,7 @@ export class Storyboard {
     const p = new Paint();
     if (duplicate) { p.load(await p.decode(await this.paint.serialize('복제'))); p.active = p.layers[this.paint.layers.indexOf(this.paint.selected)].id; }
     else p.reset(this.width, this.height);
+    p.dpi=this.dpi;
     const cut = makeCut(p, duplicate ? `${this.current.name} 복사` : `컷 ${this.cuts.length + 1}`);
     while (this.cuts.some(c=>c.id===cut.id)) cut.id=`cut-${++sequence}`;
     cut.view = this.current.view ? {...this.current.view} : null; cut.thumbnail = preview(p);
@@ -109,12 +111,12 @@ export class Storyboard {
     const p = cut.paint;
     if (!cut.cold) return p.serialize(cut.name);
     const metadata = p.layers.map(l => ({ name:l.name, visible:l.visible, opacity:l.opacity, blob:cut.cold!.find(f=>f.layer===l)!.image }));
-    const width = p.width, height = p.height, name = cut.name, guide = {...p.guide};
-    return Promise.all(metadata.map(async l => ({name:l.name,visible:l.visible,opacity:l.opacity,image:await blobURL(l.blob)}))).then(layers=>({format:'mini-paint',version:1,width,height,name,guide,layers}));
+    const width = p.width, height = p.height, name = cut.name, guide = {...p.guide}, dpi=this.dpi;
+    return Promise.all(metadata.map(async l => ({name:l.name,visible:l.visible,opacity:l.opacity,image:await blobURL(l.blob)}))).then(layers=>({format:'mini-paint',version:1,width,height,name,guide,dpi,layers}));
   }
   async serialize(name: string): Promise<ProjectV2> {
     // Every hot cut synchronously clones its canvases before the first await; cold Blobs are immutable.
-    const metadata = { format:'mini-paint' as const, version:2 as const, name, width:this.width, height:this.height, activeCut:this.current.id, whiteBackground:this.whiteBackground };
+    const metadata = { format:'mini-paint' as const, version:2 as const, name, dpi:this.dpi, width:this.width, height:this.height, activeCut:this.current.id, whiteBackground:this.whiteBackground };
     const pending = this.cuts.map(c => { const id=c.id, name=c.name, activeLayer=c.paint.layers.indexOf(c.paint.selected), view=c.view ? {...c.view}:null; const project=this.serializeCut(c); return project.then(p=>({id,name,activeLayer,view,guide:p.guide,layers:p.layers})); });
     return {...metadata,cuts:await Promise.all(pending)};
   }
@@ -123,9 +125,9 @@ export class Storyboard {
     try {
       if (!raw || typeof raw !== 'object') throw new Error('올바른 프로젝트가 아닙니다.');
       if (raw.version !== 2) {
-        const p = await staging.decode(raw); staging.load(p); story.current.thumbnail = preview(staging); return {story,name:p.name};
+        const p = await staging.decode(raw); staging.load(p); story.dpi=p.dpi; story.current.thumbnail = preview(staging); return {story,name:p.name};
       }
-      dimensions(raw.width, raw.height);
+      dimensions(raw.width, raw.height); story.dpi=readDpi(raw.dpi);
       if (raw.format !== 'mini-paint' || !Array.isArray(raw.cuts) || !raw.cuts.length || raw.cuts.length > MAX_CUTS) throw new Error('잘못된 다중 컷 프로젝트입니다.');
       const ids = new Set<string>(); const cuts: Cut[]=[];
       // Keep decoded full-resolution canvases for one staging cut at a time; reject before replacing the live document.
@@ -136,7 +138,7 @@ export class Storyboard {
         ids.add(item.id);
         const p = new Paint();
         try {
-          p.load(await p.decode({format:'mini-paint',version:1,width:raw.width,height:raw.height,guide:item.guide,layers:item.layers}));
+          p.load(await p.decode({format:'mini-paint',version:1,width:raw.width,height:raw.height,dpi:story.dpi,guide:item.guide,layers:item.layers}));
           if (!Number.isInteger(item.activeLayer) || item.activeLayer < 0 || item.activeLayer >= p.layers.length) throw new Error('잘못된 선택 레이어입니다.');
           p.active = p.layers[item.activeLayer].id;
           const cut = makeCut(p,item.name.slice(0,100)); cut.id=item.id;

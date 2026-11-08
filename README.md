@@ -68,3 +68,5 @@ Cloudflare Pages 빌드 명령은 `npm run build`, 출력 디렉터리는 `dist`
 연필 브러시 및 종이 가이드의 사용법·재현성·파일 호환성은 [확장 안내](docs/pencil-paper-guides.md)를 참고하세요. 상단에서 기본/진한 연필을 고르고 우측 작업 화면에서 가이드를 설정합니다. 가이드는 PNG에 포함되지 않습니다.
 
 인스타툰 프리셋과 다중 컷 기능, 상주 메모리 정책, version 2 구조 및 다음 단계의 범위는 [인스타툰 기반 설계](docs/instagram-foundation.md)를 참고하세요. 기본 작업 화면은 흰색이며 PNG 내보내기 배경은 별도로 고를 수 있습니다.
+
+UI 정리·숫자 직접 입력·A4/A5·DPI·사용자 프리셋·현재 컷 PSD 내보내기는 [작업 편의 기능 안내](docs/productivity-and-psd.md)를 참고하세요. PSD는 내보내기 시 Worker에서 지연 로딩하며, `.mpaint`를 대신하지 않습니다.
