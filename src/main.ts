@@ -155,7 +155,7 @@ async function exclusive(action: () => Promise<void>) { if (busy || pointer !== 
 input('fileInput').onchange = () => { const file = input('fileInput').files?.[0]; input('fileInput').value = ''; if (!file) return; void exclusive(async () => { const decoded = await app.decode(JSON.parse(await readFile(file))); if (!confirmReplace()) return; app.load(decoded); name = decoded.name === '제목 없음' ? file.name.replace(/\.(mpaint|json)$/i, '') : decoded.name; fileHandle = null; documentEpoch++; revision = savedRevision = 0; autoRevision = -1; fit(); scheduleAuto(); notify('프로젝트를 열었습니다. 저장은 새 파일로 진행됩니다.'); }); };
 input('imageInput').onchange = () => { const file = input('imageInput').files?.[0]; input('imageInput').value = ''; if (!file) return; void exclusive(async () => {
   if (file.type !== 'image/png' || file.size > 64 * 1048576) throw new Error('64 MiB 이하의 PNG 파일을 선택하세요.');
-  if ((app.layers.length + 1) * app.width * app.height > 128e6 || app.layers.length >= 40) throw new Error('레이어 메모리 한도에 도달했습니다.');
+  if ((app.layers.length + 1) * app.width * app.height > 128e6 || app.layers.length >= 50) throw new Error('레이어 메모리 한도에 도달했습니다.');
   const url = URL.createObjectURL(file); try { const img = await loadImage(url); if (img.width > 8192 || img.height > 8192) throw new Error('가져올 이미지가 너무 큽니다.');
     const l = app.makeLayer(file.name.replace(/\.png$/i, '')); const scale = Math.min(1, app.width / img.width, app.height / img.height); const w = img.width * scale, h = img.height * scale; ctx(l.canvas).drawImage(img, (app.width - w) / 2, (app.height - h) / 2, w, h);
     app.structure('이미지 가져오기', () => { app.layers.push(l); app.active = l.id; }, app.width * app.height * 4); notify(scale < 1 ? '캔버스에 맞게 이미지를 축소해 새 레이어로 가져왔습니다.' : '이미지를 새 레이어로 가져왔습니다.');

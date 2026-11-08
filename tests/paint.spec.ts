@@ -120,3 +120,43 @@ test('자동 저장 용량 오류 알림과 재시도 복구', async ({page}) =>
   await dot(page,100,100);await expect(page.locator('#autoStatus')).toHaveText('자동 저장 실패',{timeout:10000});await expect(page.locator('#toast')).toContainText('프로젝트 파일을 직접 저장');
   await page.evaluate(()=>{IDBDatabase.prototype.transaction=(window as any).__transaction;});await dot(page,200,200);await expect(page.locator('#autoStatus')).toHaveText('자동 저장 완료',{timeout:10000});
 });
+test('randomUUID 미지원 환경에서 시작·레이어 추가·프로젝트 열기·Undo/Redo', async ({page}) => {
+  await page.addInitScript(() => Object.defineProperty(Crypto.prototype, 'randomUUID', { value: undefined, configurable: true }));
+  const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
+  await page.reload(); await expect(page.locator('#pen')).toBeVisible();
+  expect(await page.evaluate(() => typeof crypto.randomUUID)).toBe('undefined');
+  await dot(page,100,100); await page.locator('#addLayer').click(); await dot(page,200,200);
+  await page.keyboard.press('Control+z'); expect((await pixel(page,200,200))[3]).toBe(0);
+  await page.keyboard.press('Control+y'); expect((await pixel(page,200,200))[3]).toBe(255);
+  const restored = await page.evaluate(async () => {
+    const a = (window as any).__paint.app, p = await a.serialize('HTTP 작업');
+    const decoded = await a.decode(p); a.load(decoded); a.add();
+    const ids = a.layers.map((l:any) => l.id); a.reset(8,8);
+    for(let i=0;i<100;i++) ids.push(a.makeLayer().id);
+    // The original loader permits up to 50 layers; keep that compatibility.
+    const tiny = await a.serialize('50 레이어');
+    const fifty = await a.decode({...tiny,layers:Array.from({length:50},()=>tiny.layers[0])});
+    return { total: ids.length, unique: new Set(ids).size, legacyLayers: fifty.layers.length };
+  });
+  expect(restored).toEqual({total:103,unique:103,legacyLayers:50}); expect(errors).toEqual([]);
+});
+test('원본 HTML에서 실제 저장한 JSON의 레이어·픽셀 호환성', async ({page}) => {
+  await page.route('**/legacy-mini-paint.html', route => route.fulfill({ path: 'tests/fixtures/mini_paint_layers.html', contentType: 'text/html' }));
+  await page.goto('/legacy-mini-paint.html');
+  let r=(await page.locator('#paper').boundingBox())!;
+  await page.mouse.click(r.x+100,r.y+100);
+  await page.locator('#add').click();
+  await page.locator('#color').fill('#ee6c55'); await page.locator('#color').dispatchEvent('input');
+  r=(await page.locator('#paper').boundingBox())!; await page.mouse.click(r.x+200,r.y+200);
+  page.once('dialog', d=>void d.accept('원본 위 레이어'));
+  await page.locator('.layer.selected .name').dblclick();
+  await page.locator('#layers .layer').last().locator('input').uncheck();
+  const pending=page.waitForEvent('download');await page.locator('#saveProject').click();const saved=await pending;
+  const {readFile}=await import('node:fs/promises');const buffer=await readFile((await saved.path())!);
+  const original=JSON.parse(buffer.toString());expect(original.width).toBe(1000);expect(original.height).toBe(700);expect(original.layers[0].visible).toBe(false);
+  await page.goto('/');await page.locator('#fileInput').setInputFiles({name:'그림-레이어.json',mimeType:'application/json',buffer});
+  await expect(page.locator('#dimensions')).toHaveText('1000 × 700 px');await expect(page.locator('#layerCount')).toHaveText('2');
+  expect(await page.evaluate(()=>{const a=(window as any).__paint.app;return a.layers.map((l:any)=>({name:l.name,visible:l.visible,opacity:l.opacity}));})).toEqual(original.layers.map((l:any)=>({name:l.name,visible:l.visible,opacity:1})));
+  expect(await pixel(page,100,100,0)).toEqual([17,17,17,255]);expect(await pixel(page,200,200,1)).toEqual([238,108,85,255]);
+  await page.keyboard.press('e');await dot(page,200,200);expect((await pixel(page,200,200,1))[3]).toBe(0);await page.keyboard.press('Control+z');expect(await pixel(page,200,200,1)).toEqual([238,108,85,255]);
+});

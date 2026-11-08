@@ -1,3 +1,7 @@
+// IDs only identify layers inside this module; they are not authentication tokens.
+// A module-wide counter also works on HTTP origins without crypto.randomUUID.
+let nextLayerId = 0;
+function layerId() { return `layer-${++nextLayerId}`; }
 export const TILE = 128;
 export const HISTORY_LIMIT = 128 * 1024 * 1024;
 export type Layer = { id: string; name: string; visible: boolean; opacity: number; canvas: HTMLCanvasElement };
@@ -27,7 +31,7 @@ export class Paint {
   changed = () => {}; render = () => {};
   constructor() { this.reset(1600, 1200); }
   get selected() { return this.layers.find(l => l.id === this.active)!; }
-  makeLayer(name = '레이어') { return { id: crypto.randomUUID(), name, visible: true, opacity: 1, canvas: canvas(this.width, this.height) }; }
+  makeLayer(name = '레이어') { return { id: layerId(), name, visible: true, opacity: 1, canvas: canvas(this.width, this.height) }; }
   reset(w: number, h: number) { dimensions(w, h); this.cancel(); this.width = w; this.height = h; this.layers = [this.makeLayer('레이어 1')]; this.active = this.layers[0].id; this.history.clear(); }
   commit(c: Command) { this.history.push(c); this.changed(); this.render(); }
   structure(label: string, action: () => void, bytes = 0) {
@@ -37,7 +41,7 @@ export class Paint {
     this.commit({ label, bytes, undo: () => { this.layers = [...before]; this.active = oldActive; }, redo: () => { this.layers = [...after]; this.active = newActive; } });
   }
   add() {
-    if ((this.layers.length + 1) * this.width * this.height > 128e6 || this.layers.length >= 40) throw new Error('레이어 메모리 한도에 도달했습니다.');
+    if ((this.layers.length + 1) * this.width * this.height > 128e6 || this.layers.length >= 50) throw new Error('레이어 메모리 한도에 도달했습니다.');
     const l = this.makeLayer(`레이어 ${this.layers.length + 1}`);
     this.structure('레이어 추가', () => { this.layers.splice(this.layers.indexOf(this.selected) + 1, 0, l); this.active = l.id; }, this.width * this.height * 4);
   }
@@ -113,7 +117,7 @@ export class Paint {
     if (p.version !== undefined && p.version !== 1) throw new Error('지원하지 않는 프로젝트 버전입니다.');
     if (p.format !== undefined && p.format !== 'mini-paint') throw new Error('지원하지 않는 프로젝트 형식입니다.');
     const w = p.width ?? p.canvasWidth, h = p.height ?? p.canvasHeight; dimensions(w, h);
-    if (!Array.isArray(p.layers) || !p.layers.length || p.layers.length > 40 || p.layers.length * w * h > 128e6) throw new Error('레이어 개수 또는 메모리 한도를 초과했습니다.');
+    if (!Array.isArray(p.layers) || !p.layers.length || p.layers.length > 50 || p.layers.length * w * h > 128e6) throw new Error('레이어 개수 또는 메모리 한도를 초과했습니다.');
     const layers: Layer[] = [];
     for (const entry of p.layers) {
       if (!entry || typeof entry !== 'object') throw new Error('잘못된 레이어입니다.');
@@ -124,7 +128,7 @@ export class Paint {
       const img = await loadImage(image);
       if (img.width !== w || img.height !== h) throw new Error('레이어와 캔버스 크기가 다릅니다.');
       const c = canvas(w, h); ctx(c).drawImage(img, 0, 0);
-      layers.push({ id: crypto.randomUUID(), name: String(entry.name ?? '레이어').slice(0, 100), visible: entry.visible !== false, opacity, canvas: c });
+      layers.push({ id: layerId(), name: String(entry.name ?? '레이어').slice(0, 100), visible: entry.visible !== false, opacity, canvas: c });
     }
     return { width: w, height: h, layers, name: typeof p.name === 'string' ? p.name.slice(0, 100) : '제목 없음' };
   }
