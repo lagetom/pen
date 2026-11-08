@@ -32,7 +32,7 @@ test('가이드 설정이 픽셀·레이어·Undo/Redo 분기에 영향을 주�
 test('가이드 실제 격자 좌표는 확대·화면 이동과 일치하고 포인터를 통과시킴',async({page})=>{
   await page.locator('#whiteBackground').check();await page.locator('#guideType').selectOption('grid');await setRange(page,'guideSpacing','32');await setRange(page,'guideOpacity','80');
   for(const zoom of [1,4]){
-    await page.evaluate(zoom=>(window as any).__paint.setZoom(zoom,0,0),zoom);await page.mouse.move(20,20);
+    await page.evaluate(zoom=>{const r=document.getElementById('paper')!.getBoundingClientRect(),s=document.getElementById('stage')!.getBoundingClientRect();(window as any).__paint.setZoom(zoom,r.x-s.x,r.y-s.y);},zoom);await page.mouse.move(20,20);
     const r=(await page.locator('#paper').boundingBox())!;const screenshot=await page.screenshot();
     const colors=await page.evaluate(async({png,x,y,zoom})=>{const img=new Image();await new Promise<void>((resolve,reject)=>{img.onload=()=>resolve();img.onerror=reject;img.src=png;});const c=document.createElement('canvas');c.width=img.width;c.height=img.height;const g=c.getContext('2d')!;g.drawImage(img,0,0);return [32,40,64].map(px=>Array.from(g.getImageData(Math.round(x+px*zoom),Math.round(y+16*zoom),1,1).data));},{png:`data:image/png;base64,${screenshot.toString('base64')}`,x:r.x,y:r.y,zoom});
     expect(colors[0][0]).toBeLessThan(245);expect(colors[1].slice(0,3)).toEqual([255,255,255]);expect(colors[2][0]).toBeLessThan(245);
