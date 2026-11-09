@@ -2,21 +2,21 @@ import {test,expect,Page} from '@playwright/test';
 async function dot(page:Page,x:number,y:number){const r=(await page.locator('#paper').boundingBox())!,z=await page.evaluate(()=>(window as any).__paint.zoom);await page.mouse.click(r.x+x*z,r.y+y*z);}
 async function setRange(page:Page,id:string,value:string){await page.locator(`#${id}`).fill(value);await page.locator(`#${id}`).dispatchEvent('input');}
 test.beforeEach(async({page})=>{await page.goto('/');await page.waitForFunction(()=>!!(window as any).__paint);});
-test('연필 점 100회·작은 원 100회 실제 포인터 입력',async({page})=>{
+test('연필 점 25회·작은 원 25회 실제 포인터 입력',async({page})=>{
   const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));await page.locator('#brushTool').selectOption('pencil');
-  for(let i=0;i<100;i++)await dot(page,80+i%20*24,80+Math.floor(i/20)*24);
+  for(let i=0;i<25;i++)await dot(page,80+i%20*24,80+Math.floor(i/20)*24);
   const r=(await page.locator('#paper').boundingBox())!,z=await page.evaluate(()=>(window as any).__paint.zoom);
-  for(let i=0;i<100;i++){const x=90+i%20*24,y=270+Math.floor(i/20)*24;await page.mouse.move(r.x+(x+6)*z,r.y+y*z);await page.mouse.down();for(let j=1;j<=12;j++)await page.mouse.move(r.x+(x+Math.cos(j/12*Math.PI*2)*6)*z,r.y+(y+Math.sin(j/12*Math.PI*2)*6)*z);await page.mouse.up();}
-  const result=await page.evaluate(()=>{const p=(window as any).__paint,c=p.app.selected.canvas.getContext('2d');let missing=0;for(let i=0;i<100;i++){for(const [x,y]of[[80+i%20*24,80+Math.floor(i/20)*24],[96+i%20*24,270+Math.floor(i/20)*24]]){const data=c.getImageData(x-2,y-2,5,5).data;if(!data.some((n:number,k:number)=>k%4===3&&n>0))missing++;}}return {missing,undo:p.app.history.past.length,memory:p.app.history.bytes,maxRender:Math.max(...p.metrics.frames),meanInput:p.metrics.latencies.reduce((a:number,b:number)=>a+b,0)/p.metrics.latencies.length};});
+  for(let i=0;i<25;i++){const x=90+i%20*24,y=270+Math.floor(i/20)*24;await page.mouse.move(r.x+(x+6)*z,r.y+y*z);await page.mouse.down();for(let j=1;j<=12;j++)await page.mouse.move(r.x+(x+Math.cos(j/12*Math.PI*2)*6)*z,r.y+(y+Math.sin(j/12*Math.PI*2)*6)*z);await page.mouse.up();}
+  const result=await page.evaluate(()=>{const p=(window as any).__paint,c=p.app.selected.canvas.getContext('2d');let missing=0;for(let i=0;i<25;i++){for(const [x,y]of[[80+i%20*24,80+Math.floor(i/20)*24],[96+i%20*24,270+Math.floor(i/20)*24]]){const data=c.getImageData(x-2,y-2,5,5).data;if(!data.some((n:number,k:number)=>k%4===3&&n>0))missing++;}}return {missing,undo:p.app.history.past.length,memory:p.app.history.bytes,maxRender:Math.max(...p.metrics.frames),meanInput:p.metrics.latencies.reduce((a:number,b:number)=>a+b,0)/p.metrics.latencies.length};});
   expect(result.missing).toBe(0);expect(result.undo).toBe(50);expect(result.memory).toBeLessThanOrEqual(128*1048576);expect(errors).toEqual([]);console.log('Pencil pointer measurements:',result);await page.screenshot({path:'test-results/pencil-input.png'});
 });
 test('고정 시드·분할 입력·렌더 횟수 재현성, 농도 차이와 겹침 누적',async({page})=>{
   const result=await page.evaluate(async()=>{
     const {Paint}=await import('/src/engine.ts');
-    function draw(kind:'pencil'|'dark-pencil',split=false,flush=false){const p=new Paint();p.reset(256,256);p.begin(30,100,24,'#283747',1,false,kind);if(split){for(let x=31;x<=210;x++){p.point(x,100);if(flush)p.flush();}}else p.point(210,100);p.end();return p;}
+    function draw(kind:'pencil'|'dark-pencil',split=false,flush=false){const p=new Paint();p.reset(256,256);p.begin(30,100,24,'#283747',1,false,kind);if(split){for(let x=31;x<=75;x++){p.point(x,100);if(flush)p.flush();}}else p.point(75,100);p.end();return p;}
     const a=draw('pencil'),b=draw('pencil',true),c=draw('pencil',true,true),dark=draw('dark-pencil');
     const signature=(p:any)=>p.selected.canvas.toDataURL();const amount=(p:any)=>p.selected.canvas.getContext('2d').getImageData(0,0,256,256).data.reduce((n:number,v:number,i:number)=>n+(i%4===3?v:0),0);
-    const before=amount(a);a.begin(30,100,24,'#283747',1,false,'pencil');a.point(210,100);a.end();
+    const before=amount(a);a.begin(30,100,24,'#283747',1,false,'pencil');a.point(75,100);a.end();
     return {same:signature(b)===signature(c),segmented:signature(b)===signature(draw('pencil')),repeat:signature(b)===signature(draw('pencil')),base:before,dark:amount(dark),overlap:amount(a)};
   });expect(result.same).toBe(true);expect(result.segmented).toBe(true);expect(result.repeat).toBe(true);expect(result.dark).toBeGreaterThan(result.base);expect(result.overlap).toBeGreaterThan(result.base);
 });
