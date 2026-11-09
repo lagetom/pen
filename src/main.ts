@@ -1,6 +1,8 @@
 import './style.css';
 import { paperTransform, canvasPoint } from './view-transform';
 import { flipLayer, duplicateLayer, LayerMove } from './layer-edits';
+import { LayerList, initLayerPanel } from './layer-panel';
+import { rectangle, inside, clearRegion, PixelMove, SelectionClipboard, type Rect } from './selection';
 import { sampleColor } from './eyedropper';
 import { withResolution } from './png-resolution';
 import { bindNumbers, syncNumbers } from './numeric';
@@ -11,6 +13,8 @@ import { Storyboard, thumbnailCanvas } from './storyboard';
 import { PRESETS, ratio, readPreset, rememberPreset } from './presets';
 import { Paint, canvas, ctx, loadImage, blob, dimensions, HISTORY_LIMIT } from './engine';
 const icons: Record<string, string> = {
+ select:'<rect x="3" y="3" width="18" height="18" stroke-dasharray="3 3"/>',
+ 'move-artwork':'<path d="M3 5h14v14H3ZM7 1h14v14M8 9v6m-3-3h6"/>',
  mirror:'<path d="M12 2v20M9 6 3 18h6Zm6 0 6 12h-6Z"/>',
  'move-layer':'<path d="M12 2v20M2 12h20M8 6l4-4 4 4M8 18l4 4 4-4M6 8l-4 4 4 4m12-8 4 4-4 4"/>',
  eyedropper:'<path d="m14 4 6 6M3 18l9-9 4 4-9 9H3Zm11-9 5-5a2 2 0 0 1 3 3l-5 5"/>',
@@ -32,9 +36,10 @@ const button = (id: string, name: string, symbol: string, extra = '') => `<butto
 document.querySelector('#app')!.innerHTML = `
 <header class="topbar"><a class="brand" href="./" aria-label="Mini Paint 홈"><span class="brandmark">${icon('pen')}</span>mini<span class="brand-paint">paint</span><small>1.0</small></a><div class="document"><span id="docName">제목 없음</span><span id="dirty" class="dirty-dot" title="저장하지 않은 변경 사항" hidden></span><span class="doc-type">.mpaint</span></div><div class="top-actions"><span class="local-badge"><i></i>내 기기에만 저장</span>${button('help','사용법','info')}</div></header>
 <nav class="filebar" aria-label="파일 도구"><div class="file-actions">${button('new','새 캔버스','file')}${button('open','열기','folder')}${button('save','저장','save')}<span class="divider"></span>${button('import','이미지 가져오기','image')}</div>${button('settings','환경 설정','save')}${button('export','내보내기','export','class="export-button"')}</nav>
-<div class="workspace"><aside class="toolrail" aria-label="그리기 도구">${button('pen','펜 (B)','pen','class="tool active" aria-pressed="true"')}${button('pencil','기본 연필','pencil','class="tool" aria-pressed="false"')}${button('dark-pencil','진한 연필','pencil','class="tool dark-pencil" aria-pressed="false"')}${button('eraser','지우개 (E)','eraser','class="tool" aria-pressed="false"')}${button('move-layer','레이어 이동 (V)','move-layer','class="tool" aria-pressed="false"')}${button('eyedropper','스포이트 (I)','eyedropper','class="tool" aria-pressed="false"')}${button('hand','화면 이동 (H)','hand','class="tool" aria-pressed="false"')}<div class="rail-line"></div><label class="rail-color" title="색상 선택"><input id="color" type="color" value="#283747" aria-label="브러시 색상"></label><button id="resetColor" class="color-reset" title="기본 색상으로 변경"><i></i><i></i></button><div class="rail-bottom">${button('diagnostics','성능 진단','info')}</div></aside>
-<main class="drawing-area"><div class="optionsbar"><strong id="toolLabel">${icon('pen')}펜</strong><select id="brushTool" aria-label="브러시 선택"><option value="pen">기본 펜</option><option value="pencil">기본 연필</option><option value="dark-pencil">진한 연필</option><option value="eraser">지우개</option><option value="hand">화면 이동</option><option value="move-layer">레이어 이동</option><option value="eyedropper">스포이트</option></select><span class="divider"></span><label>크기 <input id="size" type="range" min="1" max="100" value="8"><input id="sizeNumber" data-range="size" class="numeric" type="number" min="1" max="100" step="1" value="8" aria-label="브러시 크기 숫자"><span class="numeric-unit">px</span><output id="sizeValue" hidden>8 px</output></label><span class="divider"></span><label>불투명도 <input id="brushOpacity" type="range" min="0" max="100" value="100"><input id="brushOpacityNumber" data-range="brushOpacity" class="numeric" type="number" min="0" max="100" value="100" aria-label="브러시 불투명도 숫자"><span class="numeric-unit">%</span><output id="brushOpacityValue" hidden>100%</output></label><div class="history-actions">${button('mirrorView','보기 좌우 반전 (M)','mirror','aria-pressed="false"')}${button('undo','실행 취소 (Ctrl+Z)','undo')}${button('redo','다시 실행 (Ctrl+Y)','redo')}</div></div>
-<div id="stage" tabindex="0" aria-label="그리기 작업 공간"><div class="canvas-label">CANVAS <span id="canvasLabel">1600 × 1200</span></div><div id="paper" class="white"><canvas id="view" width="1600" height="1200" aria-label="그림 캔버스"></canvas><div id="guideOverlay" aria-hidden="true" hidden></div></div><div id="brushCursor"></div><div class="stage-hint"><kbd>Space</kbd> + 드래그로 이동 <span>·</span> <kbd>Ctrl</kbd> + 휠로 확대</div><div class="zoom-controls">${button('zoomOut','축소','minus')}<button id="zoomValue" title="100%로 보기">100%</button>${button('zoomIn','확대','plus')}<span></span>${button('fit','화면 맞춤 (Ctrl+0)','fit')}</div></div>
+<div class="workspace"><aside class="toolrail" aria-label="그리기 도구">${button('pen','펜 (B)','pen','class="tool active" aria-pressed="true"')}${button('pencil','기본 연필','pencil','class="tool" aria-pressed="false"')}${button('dark-pencil','진한 연필','pencil','class="tool dark-pencil" aria-pressed="false"')}${button('eraser','지우개 (E)','eraser','class="tool" aria-pressed="false"')}${button('select','사각형 선택 (S)','select','class="tool" aria-pressed="false"')}${button('move-artwork','전체 그림 이동','move-artwork','class="tool" aria-pressed="false"')}${button('move-layer','레이어 이동 (V)','move-layer','class="tool" aria-pressed="false"')}${button('eyedropper','스포이트 (I)','eyedropper','class="tool" aria-pressed="false"')}${button('hand','화면 이동 (H)','hand','class="tool" aria-pressed="false"')}<div class="rail-line"></div><label class="rail-color" title="색상 선택"><input id="color" type="color" value="#283747" aria-label="브러시 색상"></label><button id="resetColor" class="color-reset" title="기본 색상으로 변경"><i></i><i></i></button><div class="rail-bottom">${button('diagnostics','성능 진단','info')}</div></aside>
+<main class="drawing-area"><div class="optionsbar"><strong id="toolLabel">${icon('pen')}펜</strong><select id="brushTool" aria-label="브러시 선택"><option value="pen">기본 펜</option><option value="pencil">기본 연필</option><option value="dark-pencil">진한 연필</option><option value="eraser">지우개</option><option value="hand">화면 이동</option><option value="move-layer">레이어 이동</option><option value="eyedropper">스포이트</option><option value="select">사각형 선택</option><option value="move-artwork">전체 그림 이동</option></select><span class="divider"></span><label>크기 <input id="size" type="range" min="1" max="100" value="8"><input id="sizeNumber" data-range="size" class="numeric" type="number" min="1" max="100" step="1" value="8" aria-label="브러시 크기 숫자"><span class="numeric-unit">px</span><output id="sizeValue" hidden>8 px</output></label><span class="divider"></span><label>불투명도 <input id="brushOpacity" type="range" min="0" max="100" value="100"><input id="brushOpacityNumber" data-range="brushOpacity" class="numeric" type="number" min="0" max="100" value="100" aria-label="브러시 불투명도 숫자"><span class="numeric-unit">%</span><output id="brushOpacityValue" hidden>100%</output></label><div class="history-actions">${button('mirrorView','보기 좌우 반전 (M)','mirror','aria-pressed="false"')}${button('undo','실행 취소 (Ctrl+Z)','undo')}${button('redo','다시 실행 (Ctrl+Y)','redo')}</div></div>
+<div class="selection-actions" aria-label="선택 영역 작업"><button id="selectAll">전체 선택</button><button id="deselect">선택 해제</button><button id="copySelection">복사</button><button id="cutSelection">잘라내기</button><button id="pasteSelection">붙여넣기</button><button id="clearSelection">선택 내용 지우기</button><label><input id="moveHidden" type="checkbox" checked> 전체 그림 이동 시 숨긴 레이어 포함</label></div>
+<div id="stage" tabindex="0" aria-label="그리기 작업 공간"><div class="canvas-label">CANVAS <span id="canvasLabel">1600 × 1200</span></div><div id="paper" class="white"><canvas id="view" width="1600" height="1200" aria-label="그림 캔버스"></canvas><div id="guideOverlay" aria-hidden="true" hidden></div><div id="selectionOverlay" aria-hidden="true" hidden></div></div><div id="brushCursor"></div><div class="stage-hint"><kbd>Space</kbd> + 드래그로 이동 <span>·</span> <kbd>Ctrl</kbd> + 휠로 확대</div><div class="zoom-controls">${button('zoomOut','축소','minus')}<button id="zoomValue" title="100%로 보기">100%</button>${button('zoomIn','확대','plus')}<span></span>${button('fit','화면 맞춤 (Ctrl+0)','fit')}</div></div>
 <section class="cut-panel" aria-label="컷 관리"><div class="cut-heading"><strong>컷 <span id="cutCount">1</span></strong><span id="currentCutLabel">컷 1</span><div class="cut-actions">${button('addCut','새 컷','plus')}${button('duplicateCut','컷 복제','layers')}${button('previousLayers','이전 컷 레이어 복제','layers')}${button('cutLeft','컷 앞으로','up')}${button('cutRight','컷 뒤로','down')}${button('renameCut','컷 이름 변경','pen')}${button('deleteCut','컷 삭제','trash')}</div></div><div id="cutList" aria-label="컷 목록"></div></section>
 <footer class="statusbar"><span><i class="status-led"></i><span id="statusText">준비</span></span><span id="coordinates">—, — px</span><span id="dimensions">1600 × 1200 px</span><span id="autoStatus">자동 저장 대기</span></footer></main>
 <aside class="sidebar"><section class="brush-panel"><div class="section-heading"><h2>브러시 설정</h2><span>필압 OFF</span></div><div class="brush-preview"><span id="brushDot"></span><div><strong id="brushName">펜</strong></div><span id="brushBadge">8 px</span></div><div class="palette-label">컬러 팔레트 <span id="colorHex">#283747</span></div><div id="palette" class="palette"></div></section>
@@ -43,17 +48,36 @@ document.querySelector('#app')!.innerHTML = `
 <div id="toast" role="status" hidden></div><input id="fileInput" type="file" accept=".mpaint,.json,application/json" hidden><input id="imageInput" type="file" accept="image/png" hidden>
 <dialog id="newDialog"><form method="dialog"><div class="dialog-icon">${icon('file')}</div><h2>새 캔버스</h2><p>크기를 지정하세요. 저장하지 않은 작업을 바꾸면 확인합니다.</p><label class="preset-label" for="canvasPreset">캔버스 프리셋</label><select id="canvasPreset">${PRESETS.map(p=>`<option value="${p.id}">${p.label}</option>`).join('')}<option value="custom">사용자 지정</option></select><div id="newSizeInfo" class="size-info"></div><div class="measure-options"><label>단위 <select id="canvasUnit"><option value="px">px</option><option value="mm">mm</option></select></label><label>DPI <input id="newDpi" type="number" min="36" max="1200" value="96"></label><label>방향 <select id="canvasOrientation"><option value="portrait">세로</option><option value="landscape">가로</option></select></label></div><div id="newPrintInfo" class="size-info"></div><div class="dimension-fields"><label>가로 <input id="newWidth" type="number" min="1" max="4096" value="1600" required> <span class="dimensionUnit">px</span></label><span>×</span><label>세로 <input id="newHeight" type="number" min="1" max="4096" value="1200" required> <span class="dimensionUnit">px</span></label></div><div class="preset-buttons"><button type="button" data-preset="1600,1200">기본 4:3</button><button type="button" data-preset="1920,1080">와이드 16:9</button><button type="button" data-preset="1200,1200">정사각형</button></div><div class="dialog-actions"><button value="cancel">취소</button><button id="createDocument" value="create" class="primary">캔버스 만들기</button></div></form></dialog>
 <dialog id="exportDialog"><form method="dialog"><div class="dialog-icon">${icon('export')}</div><h2>내보내기</h2><p>현재 컷을 PNG 또는 레이어 PSD로 저장합니다.<br><span id="exportSize"></span></p><fieldset class="png-options"><legend>PNG 옵션</legend><label class="export-option"><input type="radio" name="exportBg" value="transparent" checked> 투명 배경 <span class="checker-icon"></span></label><label class="export-option"><input type="radio" name="exportBg" value="white"> 흰색 배경</label><label class="export-option"><input id="pngDpi" type="checkbox" checked>DPI 메타데이터 포함</label></fieldset><div class="dialog-actions"><button value="cancel">취소</button><button id="downloadPsd" type="button">PSD 저장</button><button id="downloadPng" class="primary" value="export">PNG 저장</button></div></form></dialog>
-<dialog id="helpDialog"><h2>사용법</h2><p>펜·연필 또는 가져온 이미지를 편집합니다.<br>레이어 이름 변경: 더블클릭</p><dl class="shortcuts"><dt>M / I / V</dt><dd>보기 반전 / 스포이트 / 레이어 이동</dd><dt>B / E / H</dt><dd>펜 / 지우개 / 화면 이동</dd><dt>Space + 드래그</dt><dd>화면 이동</dd><dt>[ / ]</dt><dd>브러시 크기</dd><dt>Ctrl + Z / Y</dt><dd>실행 취소 / 다시 실행</dd><dt>Ctrl + Shift + Z</dt><dd>다시 실행</dd><dt>Ctrl + S / Shift + S</dt><dd>저장 / 다른 이름으로 저장</dd><dt>Ctrl + O / N</dt><dd>열기 / 새 캔버스</dd><dt>Ctrl + + / − / 0</dt><dd>확대 / 축소 / 화면 맞춤</dd><dt>Delete</dt><dd>선택 레이어 내용 지우기</dd></dl><p class="muted">자동 복구는 프로젝트 파일 저장을 대신하지 않습니다.<br>압력 감지·손떨림 보정은 기본적으로 적용하지 않습니다.</p><form method="dialog"><button class="primary">알겠어요</button></form></dialog>
+<dialog id="helpDialog"><h2>사용법</h2><p>펜·연필 또는 가져온 이미지를 편집합니다.<br>레이어 이름 변경: 더블클릭 · 순서 변경: 행 드래그<br>전체 그림 이동: 도구 선택 후 드래그 · 숨긴 레이어 포함 옵션 확인</p><dl class="shortcuts"><dt>S</dt><dd>사각 선택 · 내부 드래그로 선택 픽셀 이동</dd><dt>Ctrl + A / D</dt><dd>전체 선택 / 선택 해제</dd><dt>Ctrl + C / X / V</dt><dd>선택 복사 / 잘라내기 / 새 레이어 붙여넣기</dd><dt>Escape</dt><dd>진행 중인 이동 · 선택 취소</dd><dt>M / I / V</dt><dd>보기 반전 / 스포이트 / 레이어 이동</dd><dt>B / E / H</dt><dd>펜 / 지우개 / 화면 이동</dd><dt>Space + 드래그</dt><dd>화면 이동</dd><dt>[ / ]</dt><dd>브러시 크기</dd><dt>Ctrl + Z / Y</dt><dd>실행 취소 / 다시 실행</dd><dt>Ctrl + Shift + Z</dt><dd>다시 실행</dd><dt>Ctrl + S / Shift + S</dt><dd>저장 / 다른 이름으로 저장</dd><dt>Ctrl + O / N</dt><dd>열기 / 새 캔버스</dd><dt>Ctrl + + / − / 0</dt><dd>확대 / 축소 / 화면 맞춤</dd><dt>Delete</dt><dd>선택 영역 지우기 · 선택이 없으면 레이어 지우기</dd></dl><p class="muted">자동 복구는 프로젝트 파일 저장을 대신하지 않습니다.<br>압력 감지·손떨림 보정은 기본적으로 적용하지 않습니다.</p><form method="dialog"><button class="primary">알겠어요</button></form></dialog>
 <dialog id="recoveryDialog"><h2>이전 그림이 기다리고 있어요</h2><p>이 기기에 자동 저장한 작업이 있습니다. 이어서 그릴까요?</p><div class="dialog-actions"><button id="discardRecovery">새로 시작</button><button id="restoreRecovery" class="primary">작업 복구</button></div></dialog>
 <dialog id="diagnosticDialog"><h2>개발자 진단</h2><p>현재 브라우저의 실제 측정값입니다. 입력 지연은 이벤트 처리부터 다음 렌더 완료까지이며, 화면 표시·기기 자체 지연은 포함하지 않습니다.</p><pre id="metrics"></pre><form method="dialog"><button class="primary">닫기</button></form></dialog>`;
 document.querySelector('#app')!.insertAdjacentHTML('beforeend', `<dialog id="settingsDialog"><h2>환경 설정 · 프리셋</h2><p>브라우저에 도구·작업 설정만 저장합니다. 픽셀 데이터는 포함하지 않습니다.</p><label>종류 <select id="presetKind"><option value="brush">브러시</option><option value="work">작업</option></select></label><label>이름 <input id="presetName" type="text" maxlength="100" placeholder="프리셋 이름"></label><select id="userPresetList" size="5" aria-label="사용자 프리셋"></select><div class="preset-commands"><button id="addPreset">추가</button><button id="renamePreset">이름 변경</button><button id="deletePreset">삭제</button><button id="applyPreset" class="primary">적용</button></div><p>작업 프리셋 적용은 새 캔버스를 만듭니다. 현재 작업은 먼저 저장하세요.</p><div class="preset-commands"><button id="exportPresets">JSON 내보내기</button><button id="importPresets">JSON 가져오기</button></div><form method="dialog"><button>닫기</button></form></dialog><input id="presetFileInput" type="file" accept=".json,application/json" hidden><dialog id="psdProgressDialog"><h2>PSD 내보내기</h2><p id="psdProgress" role="status">준비 중</p><progress id="psdProgressBar" max="100" value="0"></progress><button id="cancelPsd">취소</button></dialog>`);
+// Keep existing control IDs while making layers the main, independently scrolling area.
+const sidebar = document.querySelector<HTMLElement>('.sidebar')!;
+sidebar.id = 'sidebar';
+sidebar.insertAdjacentHTML('beforebegin', '<div id="sidebarResize" role="separator" aria-label="레이어 패널 너비" aria-orientation="vertical" aria-valuemin="280" aria-valuemax="520" tabindex="0"><button id="toggleSidebar" aria-controls="sidebar" aria-expanded="true" aria-label="레이어 패널 접기·펼치기">›</button></div>');
+for (const [selector, id, title] of [['.brush-panel','brushSettings','브러시 · 색상'],['.background-panel','screenSettings','작업 화면 · 종이 가이드']]) {
+  const section=sidebar.querySelector(selector)!, details=document.createElement('details'), summary=document.createElement('summary');
+  details.id=id;details.open=true;summary.textContent=title;section.before(details);details.append(summary,section);
+}
+sidebar.prepend(sidebar.querySelector('.layers-panel')!);
+sidebar.querySelector('.layers-panel .section-heading')!.insertAdjacentHTML('beforeend', '<select id="layerDensity" aria-label="레이어 행 높이"><option value="normal">기본 48px</option><option value="compact">간결 36px</option></select>');
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const input = (id: string) => $<HTMLInputElement>(id);
 let app = new Paint(), story = new Storyboard(app);
 const view = $<HTMLCanvasElement>('view'), paper = $('paper'), stage = $('stage');
-let tool: 'pen' | 'pencil' | 'dark-pencil' | 'eraser' | 'hand' | 'move-layer' | 'eyedropper' = 'pen', size = 8, brushOpacity = 1, color = '#283747';
+let tool: 'pen' | 'pencil' | 'dark-pencil' | 'eraser' | 'hand' | 'move-layer' | 'eyedropper' | 'select' | 'move-artwork' = 'pen', size = 8, brushOpacity = 1, color = '#283747';
 let thumbnailDirty = true;
-let mirrored=false,mover:LayerMove|null=null;
+let mirrored=false,mover:LayerMove|PixelMove|null=null;
+let selection:Rect|null=null,selectionLayer='',selecting:{x:number;y:number;previous:Rect|null}|null=null;
+const clipboard=new SelectionClipboard();
+const layerList=new LayerList($('layerList'), {
+  editable:()=>!busy && pointer===null,
+  select:l=>safe(()=>{app.active=l.id;ui();}), rename:l=>safe(()=>rename(l.id)),
+  toggle:l=>safe(()=>app.property(l,'visible',!l.visible)),
+  reorder:(from,to)=>safe(()=>{const source=app.layers.find(l=>l.id===from),target=app.layers.find(l=>l.id===to);if(!source||!target||source===target)return;
+    app.structure('레이어 순서 변경',()=>{const index=app.layers.indexOf(target);app.layers.splice(app.layers.indexOf(source),1);app.layers.splice(index,0,source);app.active=source.id;});})
+});
 let lastDrawingTool:'pen'|'pencil'|'dark-pencil'|'eraser'='pen';
 let zoom = 1, panX = 0, panY = 0, space = false, pointer: number | null = null, panning: { x: number; y: number; panX: number; panY: number } | null = null;
 let name = '제목 없음', revision = 0, savedRevision = 0, autoRevision = 0, documentEpoch = 0;
@@ -64,22 +88,41 @@ const frames: number[] = [], latencies: number[] = [];
 function notify(message: string) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').hidden = true, 4500); }
 let toastTimer: ReturnType<typeof setTimeout>;
 function safe(action: () => void) { try { if (!busy && pointer === null) action(); } catch (e) { notify(error(e)); } }
+function renderSelection() {
+  const r=mover instanceof PixelMove && tool==='select'?mover.selection:selection, overlay=$('selectionOverlay');
+  overlay.hidden=!r;
+  if(r)Object.assign(overlay.style,{left:`${r.x}px`,top:`${r.y}px`,width:`${r.width}px`,height:`${r.height}px`,borderWidth:`${1/zoom}px`,boxShadow:`0 0 0 ${1/zoom}px white`});
+}
+function selectionButtons() {
+  const locked=busy || pointer!==null;
+  for(const id of ['deselect','copySelection','cutSelection','clearSelection'])$<HTMLButtonElement>(id).disabled=locked || !selection;
+  $<HTMLButtonElement>('selectAll').disabled=locked;$<HTMLButtonElement>('pasteSelection').disabled=locked || !clipboard.available;
+}
+function selectAll() { selection={x:0,y:0,width:app.width,height:app.height};selectionLayer=app.active;setTool('select');renderSelection();selectionButtons(); }
+function deselect() { selection=null;renderSelection();selectionButtons(); }
+function copySelection(cut=false) {
+  if(!selection)return;clipboard.copy(app,selection);
+  if(cut)clearRegion(app,selection);
+  selectionButtons();void clipboard.writeSystem().catch(()=>notify('시스템 클립보드에 복사하지 못했습니다. 앱 안에서는 붙여넣을 수 있습니다.'));
+}
+function pasteSelection() { const r=clipboard.paste(app);if(r){selection=r;selectionLayer=app.active;setTool('select');renderSelection();selectionButtons();} }
+for(const [id,action] of [['selectAll',selectAll],['deselect',deselect],['copySelection',()=>copySelection()],['cutSelection',()=>copySelection(true)],['pasteSelection',pasteSelection],['clearSelection',()=>{if(selection)clearRegion(app,selection);}]] as const)$(id).onclick=()=>safe(action);
 function error(e: unknown) { return e instanceof Error ? e.message : String(e); }
 function render() { if (!pendingFrame) pendingFrame = requestAnimationFrame(draw); }
 function draw() {
-  pendingFrame = 0; if (busy) return; const start = performance.now(); mover?.flush(); app.flush();
+  pendingFrame = 0; if (busy) return; const start = performance.now(); mover?.flush(); if(mover)renderSelection(); app.flush();
   if (view.width !== app.width || view.height !== app.height) { view.width = app.width; view.height = app.height; }
   const c = ctx(view); c.clearRect(0, 0, view.width, view.height);
   for (const l of app.layers) if (l.visible) { c.globalAlpha = l.opacity; c.drawImage(l.canvas, 0, 0); }
   c.globalAlpha = 1;
-  if (thumbnailDirty && !app.stroke) {
+  if (thumbnailDirty && !app.stroke && !mover) {
     const thumb=thumbnailCanvas(app.width,app.height);ctx(thumb).drawImage(view,0,0,thumb.width,thumb.height);
     story.current.thumbnail=thumb.toDataURL('image/png');thumbnailDirty=false;renderCuts();
   }
   frames.push(performance.now() - start); if (frames.length > 180) frames.shift();
   if (inputAt) { latencies.push(performance.now() - inputAt); if (latencies.length > 180) latencies.shift(); inputAt = 0; }
 }
-function bindEngine() { app = story.paint; app.render = render; app.changed = changed; thumbnailDirty = true; }
+function bindEngine() { app = story.paint; app.render = render; app.changed = changed; thumbnailDirty = true; selection=null;selectionLayer='';layerList.reset();renderSelection(); }
 bindEngine();
 function ui() {
   syncGuide();
@@ -89,34 +132,25 @@ function ui() {
   ($('undo') as HTMLButtonElement).disabled = !app.history.past.length || busy || pointer !== null;
   ($('redo') as HTMLButtonElement).disabled = !app.history.future.length || busy || pointer !== null;
   $('layerCount').textContent = String(app.layers.length); $('dimensions').textContent = `${app.width} × ${app.height} px`; $('canvasLabel').textContent = `${app.width} × ${app.height} · ${ratio(app.width,app.height)}`;
-  $('layerList').replaceChildren();
-  for (const l of [...app.layers].reverse()) {
-    const row = document.createElement('div'); row.className = `layer-row ${l.id === app.active ? 'selected' : ''}`; row.setAttribute('role', 'listitem'); row.dataset.layerId = l.id;
-    const eye = document.createElement('button'); eye.className = 'eye'; eye.title = l.visible ? '레이어 숨기기' : '레이어 표시'; eye.innerHTML = icon(l.visible ? 'eye' : 'hidden'); eye.setAttribute('aria-pressed', String(l.visible));
-    eye.onclick = () => safe(() => app.property(l, 'visible', !l.visible));
-    const thumb = canvas(44, 34); thumb.className = 'layer-thumbnail'; ctx(thumb).drawImage(l.canvas, 0, 0, 44, 34);
-    const select = document.createElement('button'); select.className = 'layer-select'; select.setAttribute('aria-pressed', String(l.id === app.active));
-    const text = document.createElement('span'); text.textContent = l.name; const small = document.createElement('small'); small.textContent = `${Math.round(l.opacity * 100)}% · 일반`; select.append(text, small);
-    select.onclick = () => safe(() => { app.active = l.id; ui(); }); select.ondblclick = () => safe(() => rename(l.id));
-    const mark = document.createElement('span'); mark.className = 'active-mark'; mark.textContent = l.id === app.active ? '•' : '';
-    row.append(eye, thumb, select, mark); $('layerList').append(row);
-  }
+  if(selectionLayer!==app.active){selection=null;selectionLayer=app.active;renderSelection();}
+  layerList.sync(app,pointer!==null || !!app.stroke || !!mover);
+  selectionButtons();
   input('layerOpacity').value = String(Math.round(app.selected.opacity * 100)); $('layerOpacityValue').textContent = `${Math.round(app.selected.opacity * 100)}%`;
   ($('deleteLayer') as HTMLButtonElement).disabled = app.layers.length <= 1;
   ($('layerUp') as HTMLButtonElement).disabled = app.layers.indexOf(app.selected) === app.layers.length - 1;
   ($('layerDown') as HTMLButtonElement).disabled = app.layers.indexOf(app.selected) === 0;syncNumbers();
 }
-function changed() { revision++; thumbnailDirty = true; const trimmed=story.enforceHistoryBudget(); ui(); scheduleAuto(); if (app.history.discarded || trimmed) notify('프로젝트 히스토리 메모리 한도로 오래된 실행 취소 기록을 정리했습니다.'); }
+function changed(layers=app.layers) { layerList.invalidate(layers); revision++; thumbnailDirty = true; const trimmed=story.enforceHistoryBudget(); ui(); scheduleAuto(); if (app.history.discarded || trimmed) notify('프로젝트 히스토리 메모리 한도로 오래된 실행 취소 기록을 정리했습니다.'); }
 function transform() {
   story.current.view = {zoom,panX,panY};
   paper.style.width = `${app.width}px`; paper.style.height = `${app.height}px`; paper.style.transform = paperTransform(app.width,zoom,panX,panY,mirrored);
-  $('zoomValue').textContent = `${Math.round(zoom * 100)}%`; updateCursor();
+  $('zoomValue').textContent = `${Math.round(zoom * 100)}%`; updateCursor(); renderSelection();
 }
 function fit() { zoom = Math.max(.1, Math.min(8, (stage.clientWidth - 112) / app.width, (stage.clientHeight - 100) / app.height)); panX = (stage.clientWidth - app.width * zoom) / 2; panY = (stage.clientHeight - app.height * zoom) / 2; transform(); }
 function setZoom(next: number, x = stage.clientWidth / 2, y = stage.clientHeight / 2) { next = Math.max(.1, Math.min(8, next)); panX = x - (x - panX) * next / zoom; panY = y - (y - panY) * next / zoom; zoom = next; transform(); }
 function coordinates(e: { clientX: number; clientY: number }) { return canvasPoint(e,paper.getBoundingClientRect(),zoom,app.width,mirrored); }
 function updateCursor() { $('brushCursor').style.width = $('brushCursor').style.height = `${Math.max(3, size * zoom)}px`; stage.dataset.tool = space ? 'hand' : tool; }
-function setTool(next: typeof tool) { if (pointer !== null) return; tool = next; if(next==='pen'||next==='pencil'||next==='dark-pencil'||next==='eraser')lastDrawingTool=next; for (const t of ['pen', 'pencil', 'dark-pencil', 'eraser', 'hand', 'move-layer', 'eyedropper']) { $(t).classList.toggle('active', t === tool); $(t).setAttribute('aria-pressed', String(t === tool)); } const label = tool === 'pen' ? '펜' : tool === 'pencil' ? '기본 연필' : tool === 'dark-pencil' ? '진한 연필' : tool === 'eraser' ? '지우개' : tool==='move-layer'?'레이어 이동':tool==='eyedropper'?'스포이트':'화면 이동'; ($('brushTool') as HTMLSelectElement).value = tool; $('toolLabel').innerHTML = `${icon(tool === 'dark-pencil' ? 'pencil' : tool)}${label}`; $('brushName').textContent = label; updateCursor(); }
+function setTool(next: typeof tool) { if (pointer !== null) return; tool = next; if(next==='pen'||next==='pencil'||next==='dark-pencil'||next==='eraser')lastDrawingTool=next; for (const t of ['pen', 'pencil', 'dark-pencil', 'eraser', 'hand', 'move-layer', 'eyedropper', 'select', 'move-artwork']) { $(t).classList.toggle('active', t === tool); $(t).setAttribute('aria-pressed', String(t === tool)); } const label = tool === 'pen' ? '펜' : tool === 'pencil' ? '기본 연필' : tool === 'dark-pencil' ? '진한 연필' : tool === 'eraser' ? '지우개' : tool==='move-layer'?'레이어 이동':tool==='eyedropper'?'스포이트':tool==='select'?'사각형 선택':tool==='move-artwork'?'전체 그림 이동':'화면 이동'; ($('brushTool') as HTMLSelectElement).value = tool; $('toolLabel').innerHTML = `${icon(tool === 'dark-pencil' ? 'pencil' : tool)}${label}`; $('brushName').textContent = label; updateCursor(); }
 function setColor(value: string) { color = value; input('color').value = value; $('colorHex').textContent = value.toUpperCase(); $('brushDot').style.background = color; document.querySelectorAll<HTMLButtonElement>('.swatch').forEach(b => b.classList.toggle('selected', b.dataset.color === value)); }
 function brushUI() { $('sizeValue').innerHTML = `${size} <span>px</span>`; $('brushBadge').textContent = `${size} px`; input('size').value = String(size); $('brushOpacityValue').textContent = `${Math.round(brushOpacity * 100)}%`; syncNumbers(); $('brushDot').style.width = $('brushDot').style.height = `${Math.min(30, Math.max(4, size))}px`; updateCursor(); }
 const colors = ['#283747','#747c88','#c2c5ca','#ffffff','#ee6c55','#f2ad71','#e6c86a','#99b89b','#668fbd','#9184b3','#d39ab4','#8c6b57'];
@@ -126,8 +160,8 @@ $('brushTool').onchange = () => setTool(($('brushTool') as HTMLSelectElement).va
 input('color').oninput = () => setColor(input('color').value); $('resetColor').onclick = () => setColor('#283747');
 input('size').oninput = () => { size = Number(input('size').value); brushUI(); };
 input('brushOpacity').oninput = () => { brushOpacity = Number(input('brushOpacity').value) / 100; brushUI(); };
-for (const t of ['pen', 'pencil', 'dark-pencil', 'eraser', 'hand', 'move-layer', 'eyedropper'] as const) $(t).onclick = () => setTool(t);
-function undo(redo = false) { safe(() => { const c = redo ? app.history.redo() : app.history.undo(); if (c) { app.changed(); render(); $('statusText').textContent = `${c.label} ${redo ? '다시 실행' : '실행 취소'}`; } }); }
+for (const t of ['pen', 'pencil', 'dark-pencil', 'eraser', 'hand', 'move-layer', 'eyedropper', 'select', 'move-artwork'] as const) $(t).onclick = () => setTool(t);
+function undo(redo = false) { safe(() => { const c = redo ? app.history.redo() : app.history.undo(); if (c) { selection=null;renderSelection();app.changed(c.layers); render(); $('statusText').textContent = `${c.label} ${redo ? '다시 실행' : '실행 취소'}`; } }); }
 $('undo').onclick = () => undo(); $('redo').onclick = () => undo(true);
 $('zoomIn').onclick = () => setZoom(zoom * 1.25); $('zoomOut').onclick = () => setZoom(zoom / 1.25); $('zoomValue').onclick = () => setZoom(1); $('fit').onclick = fit;
 $('mirrorView').onclick=()=>safe(()=>{mirrored=!mirrored;$('mirrorView').setAttribute('aria-pressed',String(mirrored));transform();});
@@ -157,17 +191,23 @@ stage.addEventListener('pointerdown', e => {
   if (!pan && (p.x < 0 || p.y < 0 || p.x >= app.width || p.y >= app.height)) return;
   e.preventDefault(); stage.focus({ preventScroll: true });
   if(!pan&&tool==='eyedropper'){if(pendingFrame)cancelAnimationFrame(pendingFrame);draw();const picked=sampleColor(view,p.x,p.y);if(picked)setColor(picked);else notify('투명한 픽셀입니다.');setTool(lastDrawingTool);return;}
-  if(!pan&&tool==='move-layer'){try{mover=new LayerMove(app,p.x,p.y);}catch(e){notify(error(e));return;}}
+  if(!pan&&tool==='select'){
+    if(inside(selection,p.x,p.y)){try{mover=new PixelMove(app,p.x,p.y,[app.selected],selection);}catch(e){notify(error(e));return;}}
+    else{selecting={x:p.x,y:p.y,previous:selection};selection=null;selectionLayer=app.active;renderSelection();}
+  }
+  else if(!pan&&tool==='move-artwork'){try{mover=new PixelMove(app,p.x,p.y,app.layers.filter(l=>input('moveHidden').checked || l.visible));}catch(e){notify(error(e));return;}}
+  else if(!pan&&tool==='move-layer'){try{mover=new LayerMove(app,p.x,p.y);}catch(e){notify(error(e));return;}}
   else if (!pan && !app.begin(p.x, p.y, size, color, brushOpacity, tool === 'eraser', tool === 'pencil' || tool === 'dark-pencil' ? tool : null)) { notify('보이는 레이어와 0%보다 높은 불투명도를 선택해주세요.'); return; }
   pointer = e.pointerId; stage.setPointerCapture(e.pointerId); inputAt ||= performance.now();
   if (pan) { panning = { x: e.clientX, y: e.clientY, panX, panY }; stage.classList.add('panning'); }
-  $('statusText').textContent = pan ? '화면 이동 중' : mover ? '레이어 이동 중' : `${tool === 'pen' ? '펜' : tool === 'eraser' ? '지우개' : '연필'}으로 그리는 중`; ui();
+  $('statusText').textContent = pan ? '화면 이동 중' : selecting ? '선택 영역 지정 중' : mover ? tool==='select'?'선택 영역 이동 중':tool==='move-artwork'?'전체 그림 이동 중':'레이어 이동 중' : `${tool === 'pen' ? '펜' : tool === 'eraser' ? '지우개' : '연필'}으로 그리는 중`; ui();
 });
 stage.addEventListener('pointermove', e => {
   const p = coordinates(e), r = stage.getBoundingClientRect(); $('coordinates').textContent = `${Math.round(p.x)}, ${Math.round(p.y)} px`;
   $('brushCursor').style.left = `${e.clientX - r.left}px`; $('brushCursor').style.top = `${e.clientY - r.top}px`; $('brushCursor').hidden = p.x < 0 || p.y < 0 || p.x > app.width || p.y > app.height;
   if (e.pointerId !== pointer) return;
   if (panning) { panX = panning.panX + e.clientX - panning.x; panY = panning.panY + e.clientY - panning.y; transform(); return; }
+  if(selecting){selection=rectangle(selecting.x,selecting.y,p.x,p.y,app.width,app.height);renderSelection();return;}
   if(mover){mover.update(p.x,p.y);return;}
   inputAt ||= performance.now();
   const events = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [];
@@ -175,7 +215,8 @@ stage.addEventListener('pointermove', e => {
 });
 function finishPointer(e: PointerEvent, cancelled: boolean) {
   if (e.pointerId !== pointer) return;
-  if(mover){const editing=mover;mover=null;try{if(cancelled)editing.cancel();else{const p=coordinates(e);editing.update(p.x,p.y);editing.finish();}}catch(errorValue){editing.cancel();notify(error(errorValue));}}
+  if(selecting){const drag=selecting;selecting=null;const p=coordinates(e);selection=cancelled?drag.previous:rectangle(drag.x,drag.y,p.x,p.y,app.width,app.height);renderSelection();}
+  else if(mover){const editing=mover;mover=null;try{if(cancelled)editing.cancel();else{const p=coordinates(e);editing.update(p.x,p.y);const next=editing instanceof PixelMove && tool==='select'?editing.selection:selection;editing.finish();selection=next;}}catch(errorValue){editing.cancel();notify(error(errorValue));}renderSelection();}
   else if (cancelled) app.cancel(); else { if (app.stroke) { const p = coordinates(e); app.point(p.x, p.y); } app.end(); }
   pointer = null; panning = null; stage.classList.remove('panning'); if (stage.hasPointerCapture(e.pointerId)) stage.releasePointerCapture(e.pointerId);
   $('statusText').textContent = cancelled ? '획 취소됨' : '준비'; ui();
@@ -184,7 +225,7 @@ stage.addEventListener('pointerup', e => finishPointer(e, false)); stage.addEven
 stage.addEventListener('lostpointercapture', e => finishPointer(e, true));
 stage.addEventListener('pointerleave', () => $('brushCursor').hidden = true);
 stage.addEventListener('wheel', e => { if (e.ctrlKey && pointer === null && !busy) { e.preventDefault(); const r = stage.getBoundingClientRect(); setZoom(zoom * Math.exp(-e.deltaY * .002), e.clientX - r.left, e.clientY - r.top); } }, { passive: false });
-window.addEventListener('blur', () => { space = false; if (pointer !== null) { mover?.cancel();mover=null;app.cancel(); if (stage.hasPointerCapture(pointer)) stage.releasePointerCapture(pointer); pointer = null; panning = null; stage.classList.remove('panning'); ui(); } updateCursor(); });
+window.addEventListener('blur', () => { space = false; if (pointer !== null)finishPointer(new PointerEvent('pointercancel',{pointerId:pointer}),true); updateCursor(); });
 function dirty() { return revision !== savedRevision; }
 function confirmReplace() { return !dirty() || confirm('저장하지 않은 변경 사항이 있습니다. 현재 작업을 바꿀까요?'); }
 function newRequest() { dialog('newDialog'); }
@@ -236,14 +277,25 @@ async function readFile(file: File) {
 }
 async function exclusive(action: () => Promise<void>) { if (busy || pointer !== null) return; busy = true; ui(); try { await action(); } catch (e) { notify(error(e)); } finally { busy = false; ui(); render(); } }
 input('fileInput').onchange = () => { const file = input('fileInput').files?.[0]; input('fileInput').value = ''; if (!file) return; void exclusive(async () => { const decoded = await Storyboard.decode(JSON.parse(await readFile(file))); if (!confirmReplace()) { decoded.story.dispose(); return; } adopt(decoded.story); name = decoded.name === '제목 없음' ? file.name.replace(/\.(mpaint|json)$/i, '') : decoded.name; fileHandle = null; documentEpoch++; revision = savedRevision = 0; autoRevision = -1; restoreView(); scheduleAuto(); notify('프로젝트를 열었습니다. 저장은 새 파일로 진행됩니다.'); }); };
-input('imageInput').onchange = () => { const file = input('imageInput').files?.[0]; input('imageInput').value = ''; if (!file) return; void exclusive(async () => {
+async function importImage(file: File) { await exclusive(async () => {
   if (file.type !== 'image/png' || file.size > 64 * 1048576) throw new Error('64 MiB 이하의 PNG 파일을 선택하세요.');
   if ((app.layers.length + 1) * app.width * app.height > 128e6 || app.layers.length >= 50) throw new Error('레이어 메모리 한도에 도달했습니다.');
   const url = URL.createObjectURL(file); try { const img = await loadImage(url); if (img.width > 8192 || img.height > 8192) throw new Error('가져올 이미지가 너무 큽니다.');
     const l = app.makeLayer(file.name.replace(/\.png$/i, '')); const scale = Math.min(1, app.width / img.width, app.height / img.height); const w = img.width * scale, h = img.height * scale; ctx(l.canvas).drawImage(img, (app.width - w) / 2, (app.height - h) / 2, w, h);
     app.structure('이미지 가져오기', () => { app.layers.push(l); app.active = l.id; }, app.width * app.height * 4); notify(scale < 1 ? '캔버스에 맞게 이미지를 축소해 새 레이어로 가져왔습니다.' : '이미지를 새 레이어로 가져왔습니다.');
   } finally { URL.revokeObjectURL(url); }
-}); };
+}); }
+input('imageInput').onchange = () => { const file = input('imageInput').files?.[0]; input('imageInput').value = ''; if (file)void importImage(file); };
+function textInput(target: EventTarget | null) {
+  if(!(target instanceof HTMLElement))return false;
+  return !!target.closest('textarea, select, [contenteditable]:not([contenteditable="false"])') ||
+    (target instanceof HTMLInputElement && !['range','checkbox','radio','color'].includes(target.type));
+}
+window.addEventListener('paste',e=>{
+  if(textInput(e.target)||busy||pointer!==null||document.querySelector('dialog[open]'))return;
+  const file=Array.from(e.clipboardData?.files??[]).find(f=>f.type==='image/png');
+  if(file){e.preventDefault();void importImage(file);}
+});
 function download(data: Blob, filename: string) { const url = URL.createObjectURL(data); const a = document.createElement('a'); a.href = url; a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(url), 30000); }
 async function save(as = false) {
   if (saving || busy || pointer !== null) return; saving = true;
@@ -268,11 +320,16 @@ $('save').onclick = () => void save(); $('export').onclick = () => { $('exportSi
 $('downloadPng').onclick = e => { e.preventDefault(); $<HTMLDialogElement>('exportDialog').close(); void exclusive(async () => { const white = document.querySelector<HTMLInputElement>('input[name="exportBg"]:checked')!.value === 'white'; const pixels=await blob(app.composite(white));const result=input('pngDpi').checked?await withResolution(pixels,story.dpi):pixels;download(result, `${name}.png`); notify('PNG 다운로드를 요청했습니다.'); }); };
 window.addEventListener('keydown', e => {
   if (e.isComposing || e.altKey || document.querySelector('dialog[open]')) return;
-  if(e.key==='Escape'&&mover&&pointer!==null){e.preventDefault();finishPointer(new PointerEvent('pointercancel',{pointerId:pointer}),true);return;}
-  const target = e.target as HTMLElement; if (target.closest('textarea, select, [contenteditable="true"]') || (target instanceof HTMLInputElement && !['range', 'checkbox', 'radio', 'color'].includes(target.type))) return;
+  if(textInput(e.target))return;
+  if(e.key==='Escape'&&(mover||selecting)&&pointer!==null){e.preventDefault();finishPointer(new PointerEvent('pointercancel',{pointerId:pointer}),true);return;}
   const key = e.key.toLowerCase(), ctrl = e.ctrlKey || e.metaKey; let action: (() => void) | undefined;
   if (ctrl) {
-    if (key === 's') action = () => void save(e.shiftKey);
+    if (!e.shiftKey && key==='a')action=selectAll;
+    else if(!e.shiftKey && key==='d' && selection)action=deselect;
+    else if(!e.shiftKey && key==='c' && selection)action=()=>copySelection();
+    else if(!e.shiftKey && key==='x' && selection)action=()=>copySelection(true);
+    else if(!e.shiftKey && key==='v' && clipboard.available)action=pasteSelection;
+    else if (key === 's') action = () => void save(e.shiftKey);
     else if (key === 'o') action = openRequest;
     else if (key === 'n') action = newRequest;
     else if (key === 'z') action = () => undo(e.shiftKey);
@@ -284,16 +341,17 @@ window.addEventListener('keydown', e => {
     if (key === 'm') action=()=>$('mirrorView').click();
     else if(key==='i')action=()=>setTool('eyedropper');
     else if(key==='v')action=()=>setTool('move-layer');
+    else if(key==='s')action=()=>setTool('select');
     else if (key === 'b') action = () => setTool('pen');
     else if (key === 'e') action = () => setTool('eraser');
     else if (key === 'h') action = () => setTool('hand');
     else if (key === ' ') action = () => { space = true; updateCursor(); };
     else if (key === '[' || key === ']') action = () => { size = Math.max(1, Math.min(100, size + (key === ']' ? 1 : -1))); brushUI(); };
-    else if (key === 'delete') action = () => safe(() => app.clearLayer());
+    else if (key === 'delete') action = () => safe(() => selection?clearRegion(app,selection):app.clearLayer());
   }
   if(action && e.repeat && key==='m'){e.preventDefault();return;}
-  if (action && pointer === null && !busy && !e.repeat) { e.preventDefault(); action(); }
-  else if (action && e.repeat && !['s', 'o', 'n'].includes(key) && pointer === null && !busy) { e.preventDefault(); action(); }
+  if (action && pointer === null && !busy && !e.repeat) { e.preventDefault(); safe(action); }
+  else if (action && e.repeat && !['s', 'o', 'n','c','x','v'].includes(key) && pointer === null && !busy) { e.preventDefault(); safe(action); }
 });
 window.addEventListener('keyup', e => { if (e.code === 'Space') { space = false; updateCursor(); } });
 window.addEventListener('beforeunload', e => { if (dirty() || autoWriting || autoRevision !== revision || app.stroke || mover) { e.preventDefault(); e.returnValue = ''; } });
@@ -337,7 +395,7 @@ function selectedPreset(){const p=userPresets.find(p=>p.id===($('userPresetList'
 function presetName(){const value=input('presetName').value.trim();if(!value)throw new Error('프리셋 이름을 입력하세요.');return value;}
 $('settings').onclick=()=>{listUserPresets();dialog('settingsDialog');};$('presetKind').onchange=()=>listUserPresets();$('userPresetList').onchange=()=>{input('presetName').value=selectedPreset().name;};
 $('addPreset').onclick=()=>safe(()=>{const kind=($('presetKind') as HTMLSelectElement).value;let preset:UserPreset;
-  if(kind==='brush'){if(tool==='hand'||tool==='move-layer'||tool==='eyedropper')throw new Error('브러시 도구를 선택하세요.');preset={id:presetId(),kind:'brush',name:presetName(),tool,size,opacity:brushOpacity,color,...(tool==='pencil'||tool==='dark-pencil'?{texture:{version:1 as const}}:{})};}
+  if(kind==='brush'){if(tool==='hand'||tool==='move-layer'||tool==='eyedropper'||tool==='select'||tool==='move-artwork')throw new Error('브러시 도구를 선택하세요.');preset={id:presetId(),kind:'brush',name:presetName(),tool,size,opacity:brushOpacity,color,...(tool==='pencil'||tool==='dark-pencil'?{texture:{version:1 as const}}:{})};}
   else preset={id:presetId(),kind:'work',name:presetName(),width:app.width,height:app.height,dpi:story.dpi,guide:{...app.guide},whiteBackground:story.whiteBackground};
   storeUserPresets([...userPresets,preset],preset.id);
 });
@@ -357,8 +415,9 @@ $('downloadPsd').onclick=()=>{if(busy||pointer!==null)return;$<HTMLDialogElement
 $('cancelPsd').onclick=()=>psdAbort?.abort();$<HTMLDialogElement>('psdProgressDialog').addEventListener('cancel',e=>{e.preventDefault();psdAbort?.abort();});
 
 bindNumbers();
+initLayerPanel(sidebar,$('sidebarResize'),$<HTMLButtonElement>('toggleSidebar'),()=>!busy && pointer===null,notify);
 ui(); fit(); render(); void initRecovery();
 new ResizeObserver(() => { transform(); }).observe(stage);
 if ('serviceWorker' in navigator && import.meta.env.PROD) navigator.serviceWorker.register('/sw.js').catch(() => notify('오프라인 캐시를 준비하지 못했습니다. 온라인에서 다시 열어주세요.'));
 // Development diagnostics and deterministic browser regression tests only; excluded from production.
-if (import.meta.env.DEV) (window as any).__paint = { get app() { return app; }, get story() { return story; }, get mirrored() {return mirrored;}, get busy() { return busy; }, get revision() { return revision; }, get zoom() { return zoom; }, setZoom, coordinates, autosave, get metrics() { return { frames, latencies }; } };
+if (import.meta.env.DEV) (window as any).__paint = { get app() { return app; }, get story() { return story; }, get mirrored() {return mirrored;}, get busy() { return busy; }, get revision() { return revision; }, get zoom() { return zoom; }, get selection() { return selection; }, setZoom, coordinates, autosave, get metrics() { return { frames, latencies }; } };

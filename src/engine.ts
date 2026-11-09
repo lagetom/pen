@@ -33,12 +33,12 @@ export class Paint {
   guide = defaultGuide();
   width = 1600; height = 1200; layers: Layer[] = []; active = ''; history = new History();
   stroke: null | { layer: Layer; original: HTMLCanvasElement; mask: HTMLCanvasElement; x: number; y: number; size: number; color: string; opacity: number; erase: boolean; pencil: PencilStroke | null; tiles: Set<string>; pending: Set<string> } = null;
-  changed = () => {}; render = () => {};
+  changed = (_layers?: Layer[]) => {}; render = () => {};
   constructor() { this.reset(1600, 1200); }
   get selected() { return this.layers.find(l => l.id === this.active)!; }
   makeLayer(name = '레이어') { return { id: layerId(), name, visible: true, opacity: 1, canvas: canvas(this.width, this.height) }; }
   reset(w: number, h: number) { dimensions(w, h); this.cancel(); this.width = w; this.height = h; this.guide = defaultGuide(); this.dpi = 96; this.layers = [this.makeLayer('레이어 1')]; this.active = this.layers[0].id; this.history.clear(); }
-  commit(c: Command) { this.history.push(c); this.changed(); this.render(); }
+  commit(c: Command) { this.history.push(c); this.changed(c.layers); this.render(); }
   structure(label: string, action: () => void, bytes = 0) {
     if (this.stroke) return;
     const before = [...this.layers], oldActive = this.active;
