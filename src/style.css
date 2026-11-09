@@ -9,3 +9,28 @@ input.numeric,.background-panel input.numeric{appearance:auto;width:48px!importa
 input.numeric{appearance:textfield!important}input.numeric::-webkit-inner-spin-button,input.numeric::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}.numeric-unit{font-size:9px;color:#97a18c;flex-shrink:0;margin-left:-4px}.guide-settings .numeric-unit,.layer-opacity .numeric-unit{margin-left:-6px}
 .png-options{border:0;padding:0;margin:0}.png-options legend{font-size:11px;color:#8c9880;margin-bottom:2px}
 .layer-edit-actions{display:flex;gap:6px;padding:7px 14px;border-top:1px solid #eef0e9}.layer-edit-actions button{font-size:10px;padding:5px 7px;color:#7b8b6d}.layer-edit-actions svg{width:14px;height:14px}#mirrorView[aria-pressed=true]{background:#e1ead8;color:#4c6840}#stage[data-tool=move-layer]{cursor:move}#stage[data-tool=eyedropper]{cursor:copy}.toolrail{gap:6px}@media(max-width:760px){.layer-edit-actions button span{display:none}.layer-edit-actions{justify-content:space-around}.toolrail{gap:4px}}
+
+/* Resizable panel and selection overlays have no animation or drawing buffers. */
+.sidebar{width:var(--sidebar-width,340px)!important;flex-shrink:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;border-left:0}
+.sidebar[hidden]{display:none}.sidebar .layers-panel{flex:1 1 280px;min-height:240px;display:flex;flex-direction:column;overflow:hidden}
+.sidebar #layerList{flex:1;min-height:48px;max-height:none;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
+.sidebar .layer-row{height:48px;min-height:48px;padding:6px 10px;gap:8px;flex-shrink:0}.sidebar.compact .layer-row{height:36px;min-height:36px;padding-top:3px;padding-bottom:3px}
+.sidebar .layer-select{flex:1;min-width:0}.sidebar .layer-select span{display:block;max-width:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sidebar .layer-thumbnail{width:44px;height:34px;display:block}.sidebar.compact .layer-thumbnail{width:34px;height:26px}.sidebar.compact .layer-select small{display:none}
+.sidebar .layer-row.dragging{opacity:.5}.sidebar .section-heading{gap:8px}.sidebar .section-heading h2{margin-right:auto}
+#layerDensity{font:inherit;font-size:10px;max-width:96px;padding:4px;border:1px solid #dce3d4;background:white;color:#617457;border-radius:4px}
+.sidebar details{flex:0 1 auto;min-height:30px;overflow:auto;border-top:1px solid #dce3d4}.sidebar details[open]{max-height:30%}
+.sidebar details summary{cursor:pointer;padding:10px 14px;font-size:11px;color:#617457;list-style-position:inside;background:#f5f7ef}
+.sidebar details .brush-panel,.sidebar details .background-panel{padding:12px 16px}.sidebar details .section-heading,.sidebar details .background-panel>h2{display:none}
+.sidebar details .guide-settings{margin-top:12px;padding-top:12px}.sidebar .layer-opacity{flex-shrink:0;padding:12px 14px}.sidebar .layer-actions,.sidebar .layer-edit-actions{flex-shrink:0}
+#sidebarResize{position:relative;flex:0 0 8px;cursor:col-resize;background:#e4e9df;touch-action:none;z-index:3}
+#sidebarResize:focus-visible{outline:2px solid #668fbd;outline-offset:-2px}#sidebarResize.collapsed{flex-basis:28px;cursor:default}
+#toggleSidebar{position:absolute;top:8px;left:-9px;width:24px;height:30px;padding:0;border:1px solid #d5ddcf;border-radius:4px;background:#f8faf4;color:#617457;cursor:pointer;font-size:20px}
+#sidebarResize.collapsed #toggleSidebar{left:2px}
+.drawing-area{min-width:0}.optionsbar{flex-shrink:0;overflow-x:auto}.selection-actions{flex-shrink:0;display:flex;align-items:center;flex-wrap:wrap;gap:4px;padding:5px 10px;border-bottom:1px solid #dce3d4;background:#f9faf6}
+.selection-actions button{padding:5px 7px;font-size:10px}.selection-actions label{font-size:10px;color:#718360;display:flex;align-items:center;gap:4px;margin-left:auto}
+#selectionOverlay{position:absolute;pointer-events:none;z-index:2;border:1px dashed #17212e;box-sizing:border-box}
+#stage[data-tool=select]{cursor:crosshair}#stage[data-tool=move-artwork]{cursor:move}
+.toolrail{overflow-y:auto;flex-shrink:0}.toolrail .tool{flex-shrink:0}
+@media(max-width:1050px){.optionsbar{flex-wrap:wrap;height:auto;min-height:68px;gap:7px;padding:8px}.optionsbar .history-actions{margin-left:auto}}
+@media(max-width:760px){.sidebar .layer-select span{max-width:none}.selection-actions{gap:2px;padding:4px}.selection-actions label{margin-left:0}.sidebar details .brush-panel,.sidebar details .background-panel{padding:10px 12px}}
