@@ -1,4 +1,7 @@
 import './style.css';
+import { BRUSHES, defaults, isBrush, brushSettings, loadToolPreferences, saveToolPreferences } from './tool-settings';
+import { bucketFill } from './bucket';
+import { InvertPreview } from './pixel-operations';
 import { FreeTransform, type ImportSource, type TransformHandle } from './free-transform';
 import { paperTransform, canvasPoint } from './view-transform';
 import { flipLayer, duplicateLayer, LayerMove } from './layer-edits';
@@ -8,12 +11,13 @@ import { sampleColor } from './eyedropper';
 import { withResolution } from './png-resolution';
 import { bindNumbers, syncNumbers } from './numeric';
 import { mmToPx, pxToMm, readDpi } from './resolution';
-import { importPresets, loadPresets, savePresets, presetId, type UserPreset } from './user-presets';
+import { importPresets, loadPresets, savePresets, presetId, presetFile, type ToolSetPreset, type UserPreset } from './user-presets';
 import { readGuide, renderGuide } from './guides';
 import { Storyboard, thumbnailCanvas } from './storyboard';
 import { PRESETS, ratio, readPreset, rememberPreset } from './presets';
 import { Paint, canvas, ctx, loadImage, blob, dimensions, HISTORY_LIMIT } from './engine';
 const icons: Record<string, string> = {
+ bucket:'<path d="m4 12 8-8 8 8-8 8Zm7-9 3-2M18 18c0 4 5 4 5 0l-2.5-3Z"/>',
  select:'<rect x="3" y="3" width="18" height="18" stroke-dasharray="3 3"/>',
  'move-artwork':'<path d="M3 5h14v14H3ZM7 1h14v14M8 9v6m-3-3h6"/>',
  mirror:'<path d="M12 2v20M9 6 3 18h6Zm6 0 6 12h-6Z"/>',
@@ -37,22 +41,22 @@ const button = (id: string, name: string, symbol: string, extra = '') => `<butto
 document.querySelector('#app')!.innerHTML = `
 <header class="topbar"><a class="brand" href="./" aria-label="Mini Paint 홈"><span class="brandmark">${icon('pen')}</span>mini<span class="brand-paint">paint</span><small>1.0</small></a><div class="document"><span id="docName">제목 없음</span><span id="dirty" class="dirty-dot" title="저장하지 않은 변경 사항" hidden></span><span class="doc-type">.mpaint</span></div><div class="top-actions"><span class="local-badge"><i></i>내 기기에만 저장</span>${button('help','사용법','info')}</div></header>
 <nav class="filebar" aria-label="파일 도구"><div class="file-actions">${button('new','새 캔버스','file')}${button('open','열기','folder')}${button('save','저장','save')}<span class="divider"></span>${button('import','이미지 가져오기','image')}</div>${button('settings','환경 설정','save')}${button('export','내보내기','export','class="export-button"')}</nav>
-<div class="workspace"><aside class="toolrail" aria-label="그리기 도구">${button('pen','펜 (B)','pen','class="tool active" aria-pressed="true"')}${button('pencil','기본 연필','pencil','class="tool" aria-pressed="false"')}${button('dark-pencil','진한 연필','pencil','class="tool dark-pencil" aria-pressed="false"')}${button('eraser','지우개 (E)','eraser','class="tool" aria-pressed="false"')}${button('select','사각형 선택 (S)','select','class="tool" aria-pressed="false"')}${button('move-artwork','전체 그림 이동','move-artwork','class="tool" aria-pressed="false"')}${button('move-layer','레이어 이동 (V)','move-layer','class="tool" aria-pressed="false"')}${button('eyedropper','스포이트 (I)','eyedropper','class="tool" aria-pressed="false"')}${button('hand','화면 이동 (H)','hand','class="tool" aria-pressed="false"')}<div class="rail-line"></div><label class="rail-color" title="색상 선택"><input id="color" type="color" value="#283747" aria-label="브러시 색상"></label><button id="resetColor" class="color-reset" title="기본 색상으로 변경"><i></i><i></i></button><div class="rail-bottom">${button('diagnostics','성능 진단','info')}</div></aside>
-<main class="drawing-area"><div class="optionsbar"><strong id="toolLabel">${icon('pen')}펜</strong><select id="brushTool" aria-label="브러시 선택"><option value="pen">기본 펜</option><option value="pencil">기본 연필</option><option value="dark-pencil">진한 연필</option><option value="eraser">지우개</option><option value="hand">화면 이동</option><option value="move-layer">레이어 이동</option><option value="eyedropper">스포이트</option><option value="select">사각형 선택</option><option value="move-artwork">전체 그림 이동</option></select><span class="divider"></span><label>크기 <input id="size" type="range" min="1" max="100" value="8"><input id="sizeNumber" data-range="size" class="numeric" type="number" min="1" max="100" step="1" value="8" aria-label="브러시 크기 숫자"><span class="numeric-unit">px</span><output id="sizeValue" hidden>8 px</output></label><span class="divider"></span><label>불투명도 <input id="brushOpacity" type="range" min="0" max="100" value="100"><input id="brushOpacityNumber" data-range="brushOpacity" class="numeric" type="number" min="0" max="100" value="100" aria-label="브러시 불투명도 숫자"><span class="numeric-unit">%</span><output id="brushOpacityValue" hidden>100%</output></label><div class="history-actions">${button('mirrorView','보기 좌우 반전 (M)','mirror','aria-pressed="false"')}${button('undo','실행 취소 (Ctrl+Z)','undo')}${button('redo','다시 실행 (Ctrl+Y)','redo')}</div></div>
+<div class="workspace"><aside class="toolrail" aria-label="그리기 도구">${button('pen','펜 (B)','pen','class="tool active" aria-pressed="true"')}${button('pencil','기본 연필','pencil','class="tool" aria-pressed="false"')}${button('dark-pencil','진한 연필','pencil','class="tool dark-pencil" aria-pressed="false"')}${button('eraser','지우개 (E)','eraser','class="tool" aria-pressed="false"')}${button('bucket','페인트통 (G)','bucket','class="tool" aria-pressed="false"')}${button('select','사각형 선택 (S)','select','class="tool" aria-pressed="false"')}${button('move-artwork','전체 그림 이동','move-artwork','class="tool" aria-pressed="false"')}${button('move-layer','레이어 이동 (V)','move-layer','class="tool" aria-pressed="false"')}${button('eyedropper','스포이트 (I)','eyedropper','class="tool" aria-pressed="false"')}${button('hand','화면 이동 (H)','hand','class="tool" aria-pressed="false"')}<div class="rail-line"></div><label class="rail-color" title="색상 선택"><input id="color" type="color" value="#283747" aria-label="브러시 색상"></label><label class="rail-background" title="배경색 슬롯"><input id="backgroundColor" type="color" value="#ffffff" aria-label="배경색 슬롯"></label><button id="swapColors" title="전경색·배경색 교환 (X)" aria-label="전경색·배경색 교환">⇄</button><button id="resetColor" class="color-reset" title="기본 색상으로 변경"><i></i><i></i></button><div class="rail-bottom">${button('diagnostics','성능 진단','info')}</div></aside>
+<main class="drawing-area"><div class="optionsbar"><strong id="toolLabel">${icon('pen')}펜</strong><select id="brushTool" aria-label="브러시 선택"><option value="pen">기본 펜</option><option value="pencil">기본 연필</option><option value="dark-pencil">진한 연필</option><option value="eraser">지우개</option><option value="bucket">페인트통</option><option value="hand">화면 이동</option><option value="move-layer">레이어 이동</option><option value="eyedropper">스포이트</option><option value="select">사각형 선택</option><option value="move-artwork">전체 그림 이동</option></select><select id="toolSetMenu" aria-label="도구 세트 프리셋"><option value="">도구 세트</option></select><span class="divider"></span><label>크기 <input id="size" type="range" min="1" max="100" value="8"><input id="sizeNumber" data-range="size" class="numeric" type="number" min="1" max="100" step="1" value="8" aria-label="브러시 크기 숫자"><span class="numeric-unit">px</span><output id="sizeValue" hidden>8 px</output></label><span class="divider"></span><label>불투명도 <input id="brushOpacity" type="range" min="0" max="100" value="100"><input id="brushOpacityNumber" data-range="brushOpacity" class="numeric" type="number" min="0" max="100" value="100" aria-label="브러시 불투명도 숫자"><span class="numeric-unit">%</span><output id="brushOpacityValue" hidden>100%</output></label><div class="history-actions">${button('mirrorView','보기 좌우 반전 (M)','mirror','aria-pressed="false"')}${button('undo','실행 취소 (Ctrl+Z)','undo')}${button('redo','다시 실행 (Ctrl+Y)','redo')}</div></div>
 <div class="selection-actions" aria-label="선택 영역 작업"><button id="freeTransform">자유 변형 (Ctrl+T)</button><button id="selectAll">전체 선택</button><button id="deselect">선택 해제</button><button id="copySelection">복사</button><button id="cutSelection">잘라내기</button><button id="pasteSelection">붙여넣기</button><button id="clearSelection">선택 내용 지우기</button><label><input id="moveHidden" type="checkbox" checked> 전체 그림 이동 시 숨긴 레이어 포함</label></div>
 <div id="stage" tabindex="0" aria-label="그리기 작업 공간"><div class="canvas-label">CANVAS <span id="canvasLabel">1600 × 1200</span></div><div id="paper" class="white"><canvas id="view" width="1600" height="1200" aria-label="그림 캔버스"></canvas><div id="guideOverlay" aria-hidden="true" hidden></div><div id="selectionOverlay" aria-hidden="true" hidden></div></div><div id="brushCursor"></div><div class="stage-hint"><kbd>Space</kbd> + 드래그로 이동 <span>·</span> <kbd>Ctrl</kbd> + 휠로 확대</div><div class="zoom-controls">${button('zoomOut','축소','minus')}<button id="zoomValue" title="100%로 보기">100%</button>${button('zoomIn','확대','plus')}<span></span>${button('fit','화면 맞춤 (Ctrl+0)','fit')}</div></div>
 <section class="cut-panel" aria-label="컷 관리"><div class="cut-heading"><strong>컷 <span id="cutCount">1</span></strong><span id="currentCutLabel">컷 1</span><div class="cut-actions">${button('addCut','새 컷','plus')}${button('duplicateCut','컷 복제','layers')}${button('previousLayers','이전 컷 레이어 복제','layers')}${button('cutLeft','컷 앞으로','up')}${button('cutRight','컷 뒤로','down')}${button('renameCut','컷 이름 변경','pen')}${button('deleteCut','컷 삭제','trash')}</div></div><div id="cutList" aria-label="컷 목록"></div></section>
 <footer class="statusbar"><span><i class="status-led"></i><span id="statusText">준비</span></span><span id="coordinates">—, — px</span><span id="dimensions">1600 × 1200 px</span><span id="autoStatus">자동 저장 대기</span></footer></main>
 <aside class="sidebar"><section class="brush-panel"><div class="section-heading"><h2>브러시 설정</h2><span>필압 OFF</span></div><div class="brush-preview"><span id="brushDot"></span><div><strong id="brushName">펜</strong></div><span id="brushBadge">8 px</span></div><div class="palette-label">컬러 팔레트 <span id="colorHex">#283747</span></div><div id="palette" class="palette"></div></section>
-<section class="layers-panel"><div class="section-heading"><h2>${icon('layers')}레이어 <span id="layerCount">1</span></h2>${button('addLayer','레이어 추가','plus')}</div><div class="layer-opacity"><label for="layerOpacity">불투명도</label><input id="layerOpacityNumber" data-range="layerOpacity" class="numeric" type="number" min="0" max="100" aria-label="레이어 불투명도 숫자"><span class="numeric-unit">%</span><output hidden id="layerOpacityValue">100%</output><input id="layerOpacity" type="range" min="0" max="100" value="100"></div><div id="layerList" role="list" aria-label="레이어 목록"></div><div class="layer-edit-actions">${button('duplicateLayer','레이어 복제','layers')}${button('flipLayer','레이어 좌우 반전','mirror')}</div><div class="layer-actions">${button('layerUp','레이어 위로','up')}${button('layerDown','레이어 아래로','down')}<span></span>${button('renameLayer','레이어 이름 변경','pen')}${button('deleteLayer','레이어 삭제','trash')}</div></section>
+<section class="layers-panel"><div class="section-heading"><h2>${icon('layers')}레이어 <span id="layerCount">1</span></h2>${button('addLayer','레이어 추가','plus')}</div><div class="layer-opacity"><label for="layerOpacity">불투명도</label><input id="layerOpacityNumber" data-range="layerOpacity" class="numeric" type="number" min="0" max="100" aria-label="레이어 불투명도 숫자"><span class="numeric-unit">%</span><output hidden id="layerOpacityValue">100%</output><input id="layerOpacity" type="range" min="0" max="100" value="100"></div><div id="layerList" role="list" aria-label="레이어 목록"></div><div class="layer-edit-actions">${button('duplicateLayer','레이어 복제','layers')}${button('flipLayer','레이어 좌우 반전','mirror')}<button id="invertRGB">RGB 반전</button></div><div class="layer-actions">${button('layerUp','레이어 위로','up')}${button('layerDown','레이어 아래로','down')}<span></span>${button('renameLayer','레이어 이름 변경','pen')}${button('deleteLayer','레이어 삭제','trash')}</div></section>
 <section class="background-panel"><h2>작업 화면</h2><label><span class="checker-icon"></span>흰색 배경으로 보기 <input id="whiteBackground" type="checkbox" checked role="switch"></label><p>배경은 그림에 저장되지 않아요.</p><div class="guide-settings"><label>종이 가이드<select id="guideType"><option value="none">없음</option><option value="grid">격자</option><option value="ruled">줄노트</option><option value="dots">점 가이드</option></select></label><label>가이드 표시<input id="guideVisible" type="checkbox" checked role="switch"></label><label for="guideSpacing">간격 <input id="guideSpacingNumber" data-range="guideSpacing" class="numeric" type="number" min="8" max="64" aria-label="가이드 간격 숫자"><span class="numeric-unit">px</span><output hidden id="guideSpacingValue">24 px</output></label><input id="guideSpacing" type="range" min="8" max="64" value="24"><label>가이드 색상<select id="guideColor"><option value="blue">연한 파랑</option><option value="gray">회색</option></select></label><label for="guideOpacity">진하기 <input id="guideOpacityNumber" data-range="guideOpacity" class="numeric" type="number" min="10" max="80" aria-label="가이드 진하기 숫자"><span class="numeric-unit">%</span><output hidden id="guideOpacityValue">30%</output></label><input id="guideOpacity" type="range" min="10" max="80" value="30"><small>가이드는 PNG에 포함되지 않아요.</small></div></section></aside></div>
 <div id="toast" role="status" hidden></div><input id="fileInput" type="file" accept=".mpaint,.json,application/json" hidden><input id="imageInput" type="file" accept="image/png" hidden>
 <dialog id="newDialog"><form method="dialog"><div class="dialog-icon">${icon('file')}</div><h2>새 캔버스</h2><p>크기를 지정하세요. 저장하지 않은 작업을 바꾸면 확인합니다.</p><label class="preset-label" for="canvasPreset">캔버스 프리셋</label><select id="canvasPreset">${PRESETS.map(p=>`<option value="${p.id}">${p.label}</option>`).join('')}<option value="custom">사용자 지정</option></select><div id="newSizeInfo" class="size-info"></div><div class="measure-options"><label>단위 <select id="canvasUnit"><option value="px">px</option><option value="mm">mm</option></select></label><label>DPI <input id="newDpi" type="number" min="36" max="1200" value="96"></label><label>방향 <select id="canvasOrientation"><option value="portrait">세로</option><option value="landscape">가로</option></select></label></div><div id="newPrintInfo" class="size-info"></div><div class="dimension-fields"><label>가로 <input id="newWidth" type="number" min="1" max="4096" value="1600" required> <span class="dimensionUnit">px</span></label><span>×</span><label>세로 <input id="newHeight" type="number" min="1" max="4096" value="1200" required> <span class="dimensionUnit">px</span></label></div><div class="preset-buttons"><button type="button" data-preset="1600,1200">기본 4:3</button><button type="button" data-preset="1920,1080">와이드 16:9</button><button type="button" data-preset="1200,1200">정사각형</button></div><div class="dialog-actions"><button value="cancel">취소</button><button id="createDocument" value="create" class="primary">캔버스 만들기</button></div></form></dialog>
 <dialog id="exportDialog"><form method="dialog"><div class="dialog-icon">${icon('export')}</div><h2>내보내기</h2><p>현재 컷을 PNG 또는 레이어 PSD로 저장합니다.<br><span id="exportSize"></span></p><fieldset class="png-options"><legend>PNG 옵션</legend><label class="export-option"><input type="radio" name="exportBg" value="transparent" checked> 투명 배경 <span class="checker-icon"></span></label><label class="export-option"><input type="radio" name="exportBg" value="white"> 흰색 배경</label><label class="export-option"><input id="pngDpi" type="checkbox" checked>DPI 메타데이터 포함</label></fieldset><div class="dialog-actions"><button value="cancel">취소</button><button id="downloadPsd" type="button">PSD 저장</button><button id="downloadPng" class="primary" value="export">PNG 저장</button></div></form></dialog>
-<dialog id="helpDialog"><h2>사용법</h2><p>펜·연필 또는 가져온 이미지를 편집합니다.<br>레이어 이름 변경: 더블클릭 · 순서 변경: 행 드래그<br>전체 그림 이동: 도구 선택 후 드래그 · 숨긴 레이어 포함 옵션 확인</p><dl class="shortcuts"><dt>Ctrl + T</dt><dd>자유 변형 · Enter 확정 · Escape 취소</dd><dt>S</dt><dd>사각 선택 · 내부 드래그로 선택 픽셀 이동</dd><dt>Ctrl + A / D</dt><dd>전체 선택 / 선택 해제</dd><dt>Ctrl + C / X / V</dt><dd>선택 복사 / 잘라내기 / 새 레이어 붙여넣기</dd><dt>Escape</dt><dd>진행 중인 이동 · 선택 취소</dd><dt>M / I / V</dt><dd>보기 반전 / 스포이트 / 레이어 이동</dd><dt>B / E / H</dt><dd>펜 / 지우개 / 화면 이동</dd><dt>Space + 드래그</dt><dd>화면 이동</dd><dt>[ / ]</dt><dd>브러시 크기</dd><dt>Ctrl + Z / Y</dt><dd>실행 취소 / 다시 실행</dd><dt>Ctrl + Shift + Z</dt><dd>다시 실행</dd><dt>Ctrl + S / Shift + S</dt><dd>저장 / 다른 이름으로 저장</dd><dt>Ctrl + O / N</dt><dd>열기 / 새 캔버스</dd><dt>Ctrl + + / − / 0</dt><dd>확대 / 축소 / 화면 맞춤</dd><dt>Delete</dt><dd>선택 영역 지우기 · 선택이 없으면 레이어 지우기</dd></dl><p class="muted">자동 복구는 프로젝트 파일 저장을 대신하지 않습니다.<br>압력 감지·손떨림 보정은 기본적으로 적용하지 않습니다.</p><form method="dialog"><button class="primary">알겠어요</button></form></dialog>
+<dialog id="helpDialog"><h2>사용법</h2><p>펜·연필 또는 가져온 이미지를 편집합니다.<br>레이어 이름 변경: 더블클릭 · 순서 변경: 행 드래그<br>전체 그림 이동: 도구 선택 후 드래그 · 숨긴 레이어 포함 옵션 확인</p><dl class="shortcuts"><dt>G / X</dt><dd>페인트통 / 전경·배경색 교환</dd><dt>Ctrl + T</dt><dd>자유 변형 · Enter 확정 · Escape 취소</dd><dt>S</dt><dd>사각 선택 · 내부 드래그로 선택 픽셀 이동</dd><dt>Ctrl + A / D</dt><dd>전체 선택 / 선택 해제</dd><dt>Ctrl + C / X / V</dt><dd>선택 복사 / 잘라내기 / 새 레이어 붙여넣기</dd><dt>Escape</dt><dd>진행 중인 이동 · 선택 취소</dd><dt>M / I / V</dt><dd>보기 반전 / 스포이트 / 레이어 이동</dd><dt>B / E / H</dt><dd>펜 / 지우개 / 화면 이동</dd><dt>Space + 드래그</dt><dd>화면 이동</dd><dt>[ / ]</dt><dd>브러시 크기</dd><dt>Ctrl + Z / Y</dt><dd>실행 취소 / 다시 실행</dd><dt>Ctrl + Shift + Z</dt><dd>다시 실행</dd><dt>Ctrl + S / Shift + S</dt><dd>저장 / 다른 이름으로 저장</dd><dt>Ctrl + O / N</dt><dd>열기 / 새 캔버스</dd><dt>Ctrl + + / − / 0</dt><dd>확대 / 축소 / 화면 맞춤</dd><dt>Delete</dt><dd>선택 영역 지우기 · 선택이 없으면 레이어 지우기</dd></dl><p class="muted">자동 복구는 프로젝트 파일 저장을 대신하지 않습니다.<br>압력 감지·손떨림 보정은 기본적으로 적용하지 않습니다.</p><form method="dialog"><button class="primary">알겠어요</button></form></dialog>
 <dialog id="recoveryDialog"><h2>이전 그림이 기다리고 있어요</h2><p>이 기기에 자동 저장한 작업이 있습니다. 이어서 그릴까요?</p><div class="dialog-actions"><button id="discardRecovery">새로 시작</button><button id="restoreRecovery" class="primary">작업 복구</button></div></dialog>
 <dialog id="diagnosticDialog"><h2>개발자 진단</h2><p>현재 브라우저의 실제 측정값입니다. 입력 지연은 이벤트 처리부터 다음 렌더 완료까지이며, 화면 표시·기기 자체 지연은 포함하지 않습니다.</p><pre id="metrics"></pre><form method="dialog"><button class="primary">닫기</button></form></dialog>`;
-document.querySelector('#app')!.insertAdjacentHTML('beforeend', `<dialog id="settingsDialog"><h2>환경 설정 · 프리셋</h2><p>브라우저에 도구·작업 설정만 저장합니다. 픽셀 데이터는 포함하지 않습니다.</p><label>종류 <select id="presetKind"><option value="brush">브러시</option><option value="work">작업</option></select></label><label>이름 <input id="presetName" type="text" maxlength="100" placeholder="프리셋 이름"></label><select id="userPresetList" size="5" aria-label="사용자 프리셋"></select><div class="preset-commands"><button id="addPreset">추가</button><button id="renamePreset">이름 변경</button><button id="deletePreset">삭제</button><button id="applyPreset" class="primary">적용</button></div><p>작업 프리셋 적용은 새 캔버스를 만듭니다. 현재 작업은 먼저 저장하세요.</p><div class="preset-commands"><button id="exportPresets">JSON 내보내기</button><button id="importPresets">JSON 가져오기</button></div><form method="dialog"><button>닫기</button></form></dialog><input id="presetFileInput" type="file" accept=".json,application/json" hidden><dialog id="psdProgressDialog"><h2>PSD 내보내기</h2><p id="psdProgress" role="status">준비 중</p><progress id="psdProgressBar" max="100" value="0"></progress><button id="cancelPsd">취소</button></dialog>`);
+document.querySelector('#app')!.insertAdjacentHTML('beforeend', `<dialog id="settingsDialog"><h2>환경 설정 · 프리셋</h2><p>브라우저에 도구·작업 설정만 저장합니다. 픽셀 데이터는 포함하지 않습니다.</p><label>종류 <select id="presetKind"><option value="brush">브러시</option><option value="work">작업</option><option value="toolset">도구 세트</option></select></label><label>이름 <input id="presetName" type="text" maxlength="100" placeholder="프리셋 이름"></label><select id="userPresetList" size="5" aria-label="사용자 프리셋"></select><div class="preset-commands"><button id="addPreset">추가</button><button id="renamePreset">이름 변경</button><button id="overwritePreset">도구 세트 덮어쓰기</button><button id="deletePreset">삭제</button><button id="applyPreset" class="primary">적용</button></div><p>작업 프리셋 적용은 새 캔버스를 만듭니다. 현재 작업은 먼저 저장하세요.</p><div class="preset-commands"><button id="exportPresets">JSON 내보내기</button><button id="importPresets">JSON 가져오기</button></div><form method="dialog"><button>닫기</button></form></dialog><input id="presetFileInput" type="file" accept=".json,application/json" hidden><dialog id="psdProgressDialog"><h2>PSD 내보내기</h2><p id="psdProgress" role="status">준비 중</p><progress id="psdProgressBar" max="100" value="0"></progress><button id="cancelPsd">취소</button></dialog>`);
 // Keep existing control IDs while making layers the main, independently scrolling area.
 const sidebar = document.querySelector<HTMLElement>('.sidebar')!;
 sidebar.id = 'sidebar';
@@ -67,14 +71,16 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 const input = (id: string) => $<HTMLInputElement>(id);
 let app = new Paint(), story = new Storyboard(app);
 const view = $<HTMLCanvasElement>('view'), paper = $('paper'), stage = $('stage');
-let tool: 'pen' | 'pencil' | 'dark-pencil' | 'eraser' | 'hand' | 'move-layer' | 'eyedropper' | 'select' | 'move-artwork' = 'pen', size = 8, brushOpacity = 1, color = '#283747';
+let preferences=defaults(),preferencesError='';try{preferences=loadToolPreferences();}catch(e){preferencesError=String(e);}
+let invertPreview:InvertPreview|null=null,fillAbort:AbortController|null=null;
+let tool: 'pen' | 'pencil' | 'dark-pencil' | 'eraser' | 'hand' | 'move-layer' | 'eyedropper' | 'select' | 'move-artwork' | 'bucket' = 'pen', size = preferences.tools.pen.size, brushOpacity = preferences.tools.pen.opacity, color = preferences.foreground;
 let thumbnailDirty = true;
 let mirrored=false,mover:LayerMove|PixelMove|null=null;
 let free:FreeTransform|null=null;
 let selection:Rect|null=null,selectionLayer='',selecting:{x:number;y:number;previous:Rect|null}|null=null;
 const clipboard=new SelectionClipboard();
 const layerList=new LayerList($('layerList'), {
-  editable:()=>!busy && pointer===null && !free,
+  editable:()=>!busy && pointer===null && !free && !invertPreview,
   select:l=>safe(()=>{app.active=l.id;ui();}), rename:l=>safe(()=>rename(l.id)),
   toggle:l=>safe(()=>app.property(l,'visible',!l.visible)),
   reorder:(from,to)=>safe(()=>{const source=app.layers.find(l=>l.id===from),target=app.layers.find(l=>l.id===to);if(!source||!target||source===target)return;
@@ -89,7 +95,7 @@ let autoTimer: ReturnType<typeof setTimeout> | undefined, autoWriting = false, d
 const frames: number[] = [], latencies: number[] = [];
 function notify(message: string) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').hidden = true, 4500); }
 let toastTimer: ReturnType<typeof setTimeout>;
-function safe(action: () => void) { try { if (!busy && pointer === null && !free) action(); } catch (e) { notify(error(e)); } }
+function safe(action: () => void) { try { if (!busy && pointer === null && !free && !invertPreview) action(); } catch (e) { notify(error(e)); } }
 function renderSelection() {
   const r=mover instanceof PixelMove && tool==='select'?mover.selection:selection, overlay=$('selectionOverlay');
   overlay.hidden=!!free||!r;
@@ -129,7 +135,7 @@ function renderTransform(){
 function transformLockUI(){
   const locked=!!free;
   stage.classList.toggle('transforming',locked);
-  for(const selector of ['.sidebar','.toolrail','.filebar','.cut-panel','.selection-actions','.optionsbar>label','#brushTool'])document.querySelectorAll<HTMLElement>(selector).forEach(el=>el.inert=locked);
+  for(const selector of ['.sidebar','.toolrail','.filebar','.cut-panel','.selection-actions','.optionsbar>label','#brushTool','#toolSetMenu','#bucketOptions'])document.querySelectorAll<HTMLElement>(selector).forEach(el=>el.inert=locked);
   $('transformControls').hidden=!locked;$('selectionOverlay').hidden=locked||!selection;
 }
 function beginTransform(imported?:ImportSource){
@@ -207,17 +213,55 @@ function fit() { zoom = Math.max(.1, Math.min(8, (stage.clientWidth - 112) / app
 function setZoom(next: number, x = stage.clientWidth / 2, y = stage.clientHeight / 2) { next = Math.max(.1, Math.min(8, next)); panX = x - (x - panX) * next / zoom; panY = y - (y - panY) * next / zoom; zoom = next; transform(); }
 function coordinates(e: { clientX: number; clientY: number }) { return canvasPoint(e,paper.getBoundingClientRect(),zoom,app.width,mirrored); }
 function updateCursor() { $('brushCursor').style.width = $('brushCursor').style.height = `${Math.max(3, size * zoom)}px`; stage.dataset.tool = space ? 'hand' : tool; }
-function setTool(next: typeof tool) { if (pointer !== null || free) return; tool = next; if(next==='pen'||next==='pencil'||next==='dark-pencil'||next==='eraser')lastDrawingTool=next; for (const t of ['pen', 'pencil', 'dark-pencil', 'eraser', 'hand', 'move-layer', 'eyedropper', 'select', 'move-artwork']) { $(t).classList.toggle('active', t === tool); $(t).setAttribute('aria-pressed', String(t === tool)); } const label = tool === 'pen' ? '펜' : tool === 'pencil' ? '기본 연필' : tool === 'dark-pencil' ? '진한 연필' : tool === 'eraser' ? '지우개' : tool==='move-layer'?'레이어 이동':tool==='eyedropper'?'스포이트':tool==='select'?'사각형 선택':tool==='move-artwork'?'전체 그림 이동':'화면 이동'; ($('brushTool') as HTMLSelectElement).value = tool; $('toolLabel').innerHTML = `${icon(tool === 'dark-pencil' ? 'pencil' : tool)}${label}`; $('brushName').textContent = label; updateCursor(); }
-function setColor(value: string) { color = value; input('color').value = value; $('colorHex').textContent = value.toUpperCase(); $('brushDot').style.background = color; document.querySelectorAll<HTMLButtonElement>('.swatch').forEach(b => b.classList.toggle('selected', b.dataset.color === value)); }
-function brushUI() { $('sizeValue').innerHTML = `${size} <span>px</span>`; $('brushBadge').textContent = `${size} px`; input('size').value = String(size); $('brushOpacityValue').textContent = `${Math.round(brushOpacity * 100)}%`; syncNumbers(); $('brushDot').style.width = $('brushDot').style.height = `${Math.min(30, Math.max(4, size))}px`; updateCursor(); }
+function setTool(next: typeof tool) { if (pointer !== null || free || busy || invertPreview) return; tool = next; if(isBrush(next)){size=preferences.tools[next].size;brushOpacity=preferences.tools[next].opacity;}else if(next==='bucket')brushOpacity=preferences.bucket.opacity; if(next==='pen'||next==='pencil'||next==='dark-pencil'||next==='eraser')lastDrawingTool=next; for (const t of ['pen', 'pencil', 'dark-pencil', 'eraser', 'hand', 'move-layer', 'eyedropper', 'select', 'move-artwork', 'bucket']) { $(t).classList.toggle('active', t === tool); $(t).setAttribute('aria-pressed', String(t === tool)); } const label = tool === 'pen' ? '펜' : tool === 'pencil' ? '기본 연필' : tool === 'dark-pencil' ? '진한 연필' : tool === 'eraser' ? '지우개' : tool==='move-layer'?'레이어 이동':tool==='eyedropper'?'스포이트':tool==='bucket'?'페인트통':tool==='select'?'사각형 선택':tool==='move-artwork'?'전체 그림 이동':'화면 이동'; ($('brushTool') as HTMLSelectElement).value = tool; $('toolLabel').innerHTML = `${icon(tool === 'dark-pencil' ? 'pencil' : tool)}${label}`; $('brushName').textContent = label; brushUI(true);toolOptions(); }
+function persistTools(){try{saveToolPreferences(preferences);}catch(e){notify(`도구 설정 저장 실패: ${error(e)}`);}}
+function setColor(value: string) { color = value; preferences.foreground=value;persistTools(); input('color').value = value; $('colorHex').textContent = value.toUpperCase(); $('brushDot').style.background = color; document.querySelectorAll<HTMLButtonElement>('.swatch').forEach(b => b.classList.toggle('selected', b.dataset.color === value)); }
+function brushUI(force=false) { input('brushOpacity').value=String(Math.round(brushOpacity*100)); $('sizeValue').innerHTML = `${size} <span>px</span>`; $('brushBadge').textContent = `${size} px`; input('size').value = String(size); $('brushOpacityValue').textContent = `${Math.round(brushOpacity * 100)}%`; syncNumbers();if(force){for(const [id,value]of [['sizeNumber',size],['brushOpacityNumber',Math.round(brushOpacity*100)]] as const){input(id).value=String(value);input(id).setCustomValidity('');}} $('brushDot').style.width = $('brushDot').style.height = `${Math.min(30, Math.max(4, size))}px`; updateCursor(); }
 const colors = ['#283747','#747c88','#c2c5ca','#ffffff','#ee6c55','#f2ad71','#e6c86a','#99b89b','#668fbd','#9184b3','#d39ab4','#8c6b57'];
 for (const value of colors) { const b = document.createElement('button'); b.className = 'swatch'; b.dataset.color = value; b.style.background = value; b.title = value; b.setAttribute('aria-label', `색상 ${value}`); b.onclick = () => setColor(value); $('palette').append(b); }
 setColor(color); brushUI();
 $('brushTool').onchange = () => setTool(($('brushTool') as HTMLSelectElement).value as typeof tool);
-input('color').oninput = () => setColor(input('color').value); $('resetColor').onclick = () => setColor('#283747');
-input('size').oninput = () => { size = Number(input('size').value); brushUI(); };
-input('brushOpacity').oninput = () => { brushOpacity = Number(input('brushOpacity').value) / 100; brushUI(); };
-for (const t of ['pen', 'pencil', 'dark-pencil', 'eraser', 'hand', 'move-layer', 'eyedropper', 'select', 'move-artwork'] as const) $(t).onclick = () => setTool(t);
+input('color').oninput = () => setColor(input('color').value); input('backgroundColor').value=preferences.background;
+input('backgroundColor').oninput=()=>{preferences.background=input('backgroundColor').value;persistTools();};
+function swapColors(){const old=color,next=preferences.background;preferences.background=old;input('backgroundColor').value=old;setColor(next);}
+$('swapColors').onclick=()=>safe(swapColors);$('resetColor').onclick=()=>safe(()=>{preferences.background='#ffffff';input('backgroundColor').value=preferences.background;setColor('#283747');});
+input('size').oninput = () => { if(!isBrush(tool))return;size = Number(input('size').value);preferences.tools[tool].size=size;persistTools();brushUI();syncToolOverview(); };
+input('brushOpacity').oninput = () => { brushOpacity = Number(input('brushOpacity').value) / 100;if(isBrush(tool))preferences.tools[tool].opacity=brushOpacity;else if(tool==='bucket')preferences.bucket.opacity=brushOpacity;persistTools();brushUI();syncToolOverview(); };
+for (const t of ['pen', 'pencil', 'dark-pencil', 'eraser', 'hand', 'move-layer', 'eyedropper', 'select', 'move-artwork', 'bucket'] as const) $(t).onclick = () => setTool(t);
+const labels={pen:'펜',pencil:'기본 연필','dark-pencil':'진한 연필',eraser:'지우개'};
+input('size').closest('label')!.id='brushSizeOptions';input('brushOpacity').closest('label')!.id='opacityOptions';
+document.querySelector('.history-actions')!.insertAdjacentHTML('beforebegin',`<div id="bucketOptions" hidden><label>허용 오차 <input id="bucketTolerance" type="number" min="0" max="100" value="0" aria-label="채우기 허용 오차"></label><label>확장 <input id="bucketExpand" type="number" min="0" max="5" value="0" aria-label="채우기 확장">px</label><label><input id="bucketContiguous" type="checkbox" checked> 인접 영역</label><label>참조 <select id="bucketReference"><option value="layer">현재 레이어</option><option value="visible">보이는 모든 레이어</option></select></label></div>`);
+stage.insertAdjacentHTML('afterend','<div id="fillProgress" role="status" hidden><span id="fillStatus">채우기 준비</span><progress id="fillProgressBar" max="100" value="0"></progress><button id="cancelFill">취소 (Esc)</button></div>');
+document.querySelector('#settingsDialog .preset-commands')!.insertAdjacentHTML('beforebegin',`<table id="toolOverview"><caption>도구별 설정</caption><thead><tr><th>도구</th><th>크기 (px)</th><th>불투명도 (%)</th></tr></thead><tbody>${BRUSHES.map(t=>`<tr><th>${labels[t]}</th><td><input id="tool-${t}-size" type="number" min="1" max="100" aria-label="${labels[t]} 크기"></td><td><input id="tool-${t}-opacity" type="number" min="0" max="100" aria-label="${labels[t]} 불투명도"></td></tr>`).join('')}</tbody></table>`);
+document.querySelector('#app')!.insertAdjacentHTML('beforeend','<dialog id="invertDialog"><h2>RGB 색상 반전</h2><p>선택 영역이 있으면 해당 영역만 반전합니다. 알파는 유지합니다.</p><div class="dialog-actions"><button id="cancelInvert">취소</button><button id="applyInvert" class="primary">적용</button></div></dialog>');
+function toolOptions(){
+  $('brushSizeOptions').hidden=!isBrush(tool);$('opacityOptions').hidden=!isBrush(tool)&&tool!=='bucket';$('bucketOptions').hidden=tool!=='bucket';
+  input('bucketTolerance').value=String(preferences.bucket.tolerance);input('bucketExpand').value=String(preferences.bucket.expand);input('bucketContiguous').checked=preferences.bucket.contiguous;($('bucketReference') as HTMLSelectElement).value=preferences.bucket.reference;
+  input('bucketTolerance').setCustomValidity('');input('bucketExpand').setCustomValidity('');updateCursor();
+}
+function syncToolOverview(){for(const t of BRUSHES)for(const key of ['size','opacity'] as const){const el=input(`tool-${t}-${key}`);if(document.activeElement!==el)el.value=String(key==='size'?preferences.tools[t].size:Math.round(preferences.tools[t].opacity*100));}}
+for(const t of BRUSHES)for(const key of ['size','opacity'] as const)input(`tool-${t}-${key}`).onchange=()=>{
+  const field=input(`tool-${t}-${key}`),value=field.valueAsNumber;
+  if(!field.value.trim()||!field.validity.valid||!Number.isInteger(value)){field.value=String(key==='size'?preferences.tools[t].size:preferences.tools[t].opacity*100);return;}
+  preferences.tools[t][key]=key==='size'?value:value/100;
+  if(tool===t){size=preferences.tools[t].size;brushOpacity=preferences.tools[t].opacity;brushUI();}persistTools();
+};
+for(const [id,key,max]of [['bucketTolerance','tolerance',100],['bucketExpand','expand',5]] as const){
+  input(id).oninput=()=>{const field=input(id),value=field.valueAsNumber;field.setCustomValidity('');if(!field.value.trim()||!Number.isInteger(value)||value<0||value>max){field.setCustomValidity(`0~${max} 정수를 입력하세요.`);return;}preferences.bucket[key]=value;persistTools();};
+  input(id).onblur=()=>{input(id).setCustomValidity('');input(id).value=String(preferences.bucket[key]);};
+}
+$('bucketContiguous').onchange=()=>{preferences.bucket.contiguous=input('bucketContiguous').checked;persistTools();};
+$('bucketReference').onchange=()=>{preferences.bucket.reference=($('bucketReference') as HTMLSelectElement).value as 'layer'|'visible';persistTools();};
+async function runBucket(x:number,y:number){
+  if(busy||free||invertPreview||pointer!==null)return;
+  const settings={...preferences.bucket},foreground=color,region=selection?{...selection}:null,controller=new AbortController();fillAbort=controller;$('fillProgress').hidden=false;
+  try{await exclusive(async()=>{await bucketFill(app,x,y,foreground,settings,region,{signal:controller.signal,progress:(phase,done)=>{$('fillStatus').textContent=`${phase} ${done}%`;($('fillProgressBar') as HTMLProgressElement).value=done;}});});}
+  finally{fillAbort=null;$('fillProgress').hidden=true;toolOptions();}
+}
+$('cancelFill').onclick=()=>fillAbort?.abort();
+$('invertRGB').onclick=()=>safe(()=>{invertPreview=new InvertPreview(app,selection);$<HTMLDialogElement>('invertDialog').showModal();});
+function endInvert(apply:boolean){const edit=invertPreview;if(!edit)return;invertPreview=null;try{if(apply)edit.finish();else edit.cancel();}catch(e){edit.cancel();notify(error(e));}finally{$<HTMLDialogElement>('invertDialog').close();layerList.invalidate([app.selected]);ui();render();}}
+$('applyInvert').onclick=()=>endInvert(true);$('cancelInvert').onclick=()=>endInvert(false);$<HTMLDialogElement>('invertDialog').addEventListener('cancel',e=>{e.preventDefault();endInvert(false);});
 function undo(redo = false) { safe(() => { const c = redo ? app.history.redo() : app.history.undo(); if (c) { selection=null;renderSelection();app.changed(c.layers); render(); $('statusText').textContent = `${c.label} ${redo ? '다시 실행' : '실행 취소'}`; } }); }
 $('undo').onclick = () => undo(); $('redo').onclick = () => undo(true);
 $('zoomIn').onclick = () => setZoom(zoom * 1.25); $('zoomOut').onclick = () => setZoom(zoom / 1.25); $('zoomValue').onclick = () => setZoom(1); $('fit').onclick = fit;
@@ -249,6 +293,7 @@ stage.addEventListener('pointerdown', e => {
   const p = coordinates(e); const pan = tool === 'hand' || space || e.button === 1;
   if (!pan && (p.x < 0 || p.y < 0 || p.x >= app.width || p.y >= app.height)) return;
   e.preventDefault(); stage.focus({ preventScroll: true });
+  if(!pan&&tool==='bucket'){void runBucket(p.x,p.y);return;}
   if(!pan&&tool==='eyedropper'){if(pendingFrame)cancelAnimationFrame(pendingFrame);draw();const picked=sampleColor(view,p.x,p.y);if(picked)setColor(picked);else notify('투명한 픽셀입니다.');setTool(lastDrawingTool);return;}
   if(!pan&&tool==='select'){
     if(inside(selection,p.x,p.y)){try{mover=new PixelMove(app,p.x,p.y,[app.selected],selection);}catch(e){notify(error(e));return;}}
@@ -336,7 +381,7 @@ async function readFile(file: File) {
   if (file.size > 128 * 1048576) throw new Error('파일 크기 한도는 128 MiB입니다.');
   return file.text();
 }
-async function exclusive(action: () => Promise<void>) { if (busy || pointer !== null || free) return; busy = true; ui(); try { await action(); } catch (e) { notify(error(e)); } finally { busy = false; ui(); render(); } }
+async function exclusive(action: () => Promise<void>) { if (busy || pointer !== null || free || invertPreview) return; busy = true; ui(); try { await action(); } catch (e) { notify(error(e)); } finally { busy = false; ui(); render(); } }
 input('fileInput').onchange = () => { const file = input('fileInput').files?.[0]; input('fileInput').value = ''; if (!file) return; void exclusive(async () => { const decoded = await Storyboard.decode(JSON.parse(await readFile(file))); if (!confirmReplace()) { decoded.story.dispose(); return; } adopt(decoded.story); name = decoded.name === '제목 없음' ? file.name.replace(/\.(mpaint|json)$/i, '') : decoded.name; fileHandle = null; documentEpoch++; revision = savedRevision = 0; autoRevision = -1; restoreView(); scheduleAuto(); notify('프로젝트를 열었습니다. 저장은 새 파일로 진행됩니다.'); }); };
 async function importImage(file: File) { let original:ImportSource|undefined;await exclusive(async () => {
   if (file.type !== 'image/png' || file.size > 64 * 1048576) throw new Error('64 MiB 이하의 PNG 파일을 선택하세요.');
@@ -382,6 +427,7 @@ $('save').onclick = () => void save(); $('export').onclick = () => { $('exportSi
 $('downloadPng').onclick = e => { e.preventDefault(); $<HTMLDialogElement>('exportDialog').close(); void exclusive(async () => { const white = document.querySelector<HTMLInputElement>('input[name="exportBg"]:checked')!.value === 'white'; const pixels=await blob(app.composite(white));const result=input('pngDpi').checked?await withResolution(pixels,story.dpi):pixels;download(result, `${name}.png`); notify('PNG 다운로드를 요청했습니다.'); }); };
 window.addEventListener('keydown', e => {
   if (e.isComposing || e.altKey || document.querySelector('dialog[open]')) return;
+  if(fillAbort){if(e.key==='Escape'){e.preventDefault();fillAbort.abort();}else if((e.ctrlKey||e.metaKey)&&['s','o','n','z','y'].includes(e.key.toLowerCase())){e.preventDefault();notify('채우기 완료 또는 취소 후 사용하세요.');}return;}
   if(free){
     const field=(e.target as HTMLElement).closest('#transformControls');
     if(e.key==='Escape' || (e.key==='Enter' && (!textInput(e.target)||field))){e.preventDefault();endTransform(e.key==='Enter');return;}
@@ -416,11 +462,13 @@ window.addEventListener('keydown', e => {
     else if(key==='i')action=()=>setTool('eyedropper');
     else if(key==='v')action=()=>setTool('move-layer');
     else if(key==='s')action=()=>setTool('select');
+    else if(key==='g')action=()=>setTool('bucket');
+    else if(key==='x')action=swapColors;
     else if (key === 'b') action = () => setTool('pen');
     else if (key === 'e') action = () => setTool('eraser');
     else if (key === 'h') action = () => setTool('hand');
     else if (key === ' ') action = () => { space = true; updateCursor(); };
-    else if (key === '[' || key === ']') action = () => { size = Math.max(1, Math.min(100, size + (key === ']' ? 1 : -1))); brushUI(); };
+    else if ((key === '[' || key === ']') && isBrush(tool)) action = () => { size = Math.max(1, Math.min(100, size + (key === ']' ? 1 : -1)));preferences.tools[tool as keyof typeof preferences.tools].size=size;persistTools();brushUI();syncToolOverview(); };
     else if (key === 'delete') action = () => safe(() => selection?clearRegion(app,selection):app.clearLayer());
   }
   if(action && e.repeat && key==='m'){e.preventDefault();return;}
@@ -428,7 +476,7 @@ window.addEventListener('keydown', e => {
   else if (action && e.repeat && !['s', 'o', 'n','c','x','v'].includes(key) && pointer === null && !busy) { e.preventDefault(); safe(action); }
 });
 window.addEventListener('keyup', e => { if (e.code === 'Space') { space = false; updateCursor(); } });
-window.addEventListener('beforeunload', e => { if (dirty() || autoWriting || autoRevision !== revision || app.stroke || mover || free) { e.preventDefault(); e.returnValue = ''; } });
+window.addEventListener('beforeunload', e => { if (dirty() || autoWriting || autoRevision !== revision || app.stroke || mover || free || invertPreview || fillAbort) { e.preventDefault(); e.returnValue = ''; } });
 function dbRequest(mode: IDBTransactionMode, value?: unknown): Promise<unknown> { return new Promise((resolve, reject) => {
   if (!db) { reject(new Error('자동 저장소를 사용할 수 없습니다.')); return; }
   const tx = db.transaction('recovery', mode), store = tx.objectStore('recovery'); const request = mode === 'readonly' ? store.get('last') : store.put(value, 'last');
@@ -437,7 +485,7 @@ function dbRequest(mode: IDBTransactionMode, value?: unknown): Promise<unknown> 
 function scheduleAuto() { autoFailed = false; clearTimeout(autoTimer); $('autoStatus').textContent = '자동 저장 대기'; autoTimer = setTimeout(() => void autosave(), 1200); }
 async function autosave() {
   if (!db) return;
-  if (autoWriting || busy || pointer !== null || free) { autoTimer = setTimeout(() => void autosave(), 1200); return; }
+  if (autoWriting || busy || pointer !== null || free || invertPreview) { autoTimer = setTimeout(() => void autosave(), 1200); return; }
   autoWriting = true; const version = revision, epoch = documentEpoch; $('autoStatus').textContent = '자동 저장 중…';
   try { const project = await story.serialize(name); if (epoch !== documentEpoch) return; await dbRequest('readwrite', { project, at: Date.now() });
     if (epoch === documentEpoch) { autoRevision = version; $('autoStatus').textContent = revision === version ? '자동 저장 완료' : '자동 저장 대기'; }
@@ -464,23 +512,30 @@ function listUserPresets(selected='') {
   const list=$('userPresetList') as HTMLSelectElement,kind=($('presetKind') as HTMLSelectElement).value;list.replaceChildren();
   for(const p of userPresets.filter(p=>p.kind===kind)){const o=document.createElement('option');o.value=p.id;o.textContent=p.name;list.append(o);}if(selected)list.value=selected;
 }
-function storeUserPresets(next:UserPreset[],selected=''){savePresets(next);userPresets=next;listUserPresets(selected);}
+function storeUserPresets(next:UserPreset[],selected=''){savePresets(next);userPresets=next;listUserPresets(selected);syncToolSets();}
 function selectedPreset(){const p=userPresets.find(p=>p.id===($('userPresetList') as HTMLSelectElement).value);if(!p)throw new Error('프리셋을 선택하세요.');return p;}
+function toolSetSnapshot(id:string,name:string):ToolSetPreset{return {id,name,kind:'toolset',tools:brushSettings(preferences.tools),foreground:color,background:preferences.background};}
+function applyToolSet(p:ToolSetPreset){preferences.tools=brushSettings(p.tools);preferences.foreground=p.foreground;preferences.background=p.background;setColor(p.foreground);input('backgroundColor').value=p.background;if(isBrush(tool)){size=preferences.tools[tool].size;brushOpacity=preferences.tools[tool].opacity;}brushUI(true);syncToolOverview();}
+function syncToolSets(){const menu=$('toolSetMenu') as HTMLSelectElement,value=menu.value;menu.replaceChildren(new Option('도구 세트',''));for(const p of userPresets)if(p.kind==='toolset')menu.append(new Option(p.name,p.id));menu.value=value;}
+$('toolSetMenu').onchange=()=>safe(()=>{const menu=$('toolSetMenu') as HTMLSelectElement,p=userPresets.find(p=>p.id===menu.value);if(p?.kind==='toolset')applyToolSet(p);menu.value='';});
+$('overwritePreset').onclick=()=>safe(()=>{const p=selectedPreset();if(p.kind!=='toolset')throw new Error('도구 세트 프리셋을 선택하세요.');storeUserPresets(userPresets.map(old=>old.id===p.id?toolSetSnapshot(p.id,p.name):old),p.id);});
 function presetName(){const value=input('presetName').value.trim();if(!value)throw new Error('프리셋 이름을 입력하세요.');return value;}
-$('settings').onclick=()=>{listUserPresets();dialog('settingsDialog');};$('presetKind').onchange=()=>listUserPresets();$('userPresetList').onchange=()=>{input('presetName').value=selectedPreset().name;};
+$('settings').onclick=()=>{listUserPresets();syncToolOverview();dialog('settingsDialog');};$('presetKind').onchange=()=>listUserPresets();$('userPresetList').onchange=()=>{input('presetName').value=selectedPreset().name;};
 $('addPreset').onclick=()=>safe(()=>{const kind=($('presetKind') as HTMLSelectElement).value;let preset:UserPreset;
-  if(kind==='brush'){if(tool==='hand'||tool==='move-layer'||tool==='eyedropper'||tool==='select'||tool==='move-artwork')throw new Error('브러시 도구를 선택하세요.');preset={id:presetId(),kind:'brush',name:presetName(),tool,size,opacity:brushOpacity,color,...(tool==='pencil'||tool==='dark-pencil'?{texture:{version:1 as const}}:{})};}
+  if(kind==='brush'){if(!isBrush(tool))throw new Error('브러시 도구를 선택하세요.');preset={id:presetId(),kind:'brush',name:presetName(),tool,size,opacity:brushOpacity,color,...(tool==='pencil'||tool==='dark-pencil'?{texture:{version:1 as const}}:{})};}
+  else if(kind==='toolset')preset=toolSetSnapshot(presetId(),presetName());
   else preset={id:presetId(),kind:'work',name:presetName(),width:app.width,height:app.height,dpi:story.dpi,guide:{...app.guide},whiteBackground:story.whiteBackground};
-  storeUserPresets([...userPresets,preset],preset.id);
+  storeUserPresets([preset,...userPresets],preset.id);
 });
 $('renamePreset').onclick=()=>safe(()=>{const old=selectedPreset();storeUserPresets(userPresets.map(p=>p.id===old.id?{...p,name:presetName()}:p),old.id);});
 $('deletePreset').onclick=()=>safe(()=>{const old=selectedPreset();storeUserPresets(userPresets.filter(p=>p.id!==old.id));});
 $('applyPreset').onclick=()=>safe(()=>{const p=selectedPreset();
-  if(p.kind==='brush'){setTool(p.tool);size=p.size;brushOpacity=p.opacity;input('brushOpacity').value=String(Math.round(p.opacity*100));setColor(p.color);brushUI();}
+  if(p.kind==='brush'){preferences.tools[p.tool]={size:p.size,opacity:p.opacity};setTool(p.tool);setColor(p.color);brushUI();syncToolOverview();}
+  else if(p.kind==='toolset')applyToolSet(p);
   else {if(!confirmReplace())return;const paint=new Paint();paint.reset(p.width,p.height);paint.dpi=p.dpi;paint.guide={...p.guide};const next=new Storyboard(paint);next.whiteBackground=p.whiteBackground;adopt(next);name='제목 없음';fileHandle=null;documentEpoch++;revision=savedRevision=0;autoRevision=-1;fit();ui();render();scheduleAuto();}
   $<HTMLDialogElement>('settingsDialog').close();
 });
-$('exportPresets').onclick=()=>download(new Blob([JSON.stringify({format:'mini-paint-presets',version:1,presets:userPresets},null,2)],{type:'application/json'}),'mini-paint-presets.json');
+$('exportPresets').onclick=()=>download(new Blob([JSON.stringify(presetFile(userPresets),null,2)],{type:'application/json'}),'mini-paint-presets.json');
 $('importPresets').onclick=()=>input('presetFileInput').click();input('presetFileInput').onchange=()=>{const file=input('presetFileInput').files?.[0];input('presetFileInput').value='';if(!file)return;void(async()=>{try{if(file.size>256*1024)throw new Error('프리셋 JSON은 256 KiB 이하만 가져올 수 있습니다.');const imported=importPresets(JSON.parse(await file.text())).map(p=>({...p,id:presetId()}));storeUserPresets([...userPresets,...imported]);notify(`${imported.length}개 프리셋을 가져왔습니다.`);}catch(e){notify(error(e));}})();};
 let psdAbort:AbortController|null=null;
 $('downloadPsd').onclick=()=>{if(busy||pointer!==null||free)return;$<HTMLDialogElement>('exportDialog').close();$<HTMLDialogElement>('psdProgressDialog').showModal();psdAbort=new AbortController();const signal=psdAbort.signal;
@@ -488,10 +543,10 @@ $('downloadPsd').onclick=()=>{if(busy||pointer!==null||free)return;$<HTMLDialogE
 };
 $('cancelPsd').onclick=()=>psdAbort?.abort();$<HTMLDialogElement>('psdProgressDialog').addEventListener('cancel',e=>{e.preventDefault();psdAbort?.abort();});
 
-bindNumbers();
+bindNumbers();toolOptions();syncToolOverview();syncToolSets();if(preferencesError)notify(`도구 설정 읽기 실패: ${preferencesError}`);
 initLayerPanel(sidebar,$('sidebarResize'),$<HTMLButtonElement>('toggleSidebar'),()=>!busy && pointer===null && !free,notify);
 ui(); fit(); render(); void initRecovery();
 new ResizeObserver(() => { transform(); }).observe(stage);
 if ('serviceWorker' in navigator && import.meta.env.PROD) navigator.serviceWorker.register('/sw.js').catch(() => notify('오프라인 캐시를 준비하지 못했습니다. 온라인에서 다시 열어주세요.'));
 // Development diagnostics and deterministic browser regression tests only; excluded from production.
-if (import.meta.env.DEV) (window as any).__paint = { get app() { return app; }, get story() { return story; }, get mirrored() {return mirrored;}, get busy() { return busy; }, get revision() { return revision; }, get zoom() { return zoom; }, get selection() { return selection; }, get freeTransform() { return free?.state ?? null; }, setZoom, coordinates, autosave, get metrics() { return { frames, latencies }; } };
+if (import.meta.env.DEV) (window as any).__paint = { get app() { return app; }, get story() { return story; }, get mirrored() {return mirrored;}, get busy() { return busy; }, get revision() { return revision; }, get zoom() { return zoom; }, get selection() { return selection; }, get freeTransform() { return free?.state ?? null; }, get toolPreferences() { return structuredClone(preferences); }, setZoom, coordinates, autosave, get metrics() { return { frames, latencies }; } };
