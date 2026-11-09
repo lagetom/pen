@@ -76,7 +76,7 @@ test('프로젝트 라운드트립, PNG 가져오기/투명·흰 배경, 손상 
   // The open confirmation may occur asynchronously after PNG decoding.
   await expect(page.locator('#docName')).toHaveText('테스트 그림');expect((await state(page)).layers).toBe(2);expect(await pixel(page,200,200)).toEqual(expected);
   const bytes=await page.evaluate(async()=>{const a=(window as any).__paint.app;const p=await a.serialize('png');return p.layers[1].image.split(',')[1];});
-  await page.locator('#imageInput').setInputFiles({name:'import.png',mimeType:'image/png',buffer:Buffer.from(bytes,'base64')});await expect(page.locator('#layerCount')).toHaveText('3');
+  await page.locator('#imageInput').setInputFiles({name:'import.png',mimeType:'image/png',buffer:Buffer.from(bytes,'base64')});await expect(page.locator('#layerCount')).toHaveText('3');await expect(page.locator('#transformControls')).toBeVisible();await page.locator('#applyTransform').click();
   const exportPixels=await page.evaluate(()=>{const a=(window as any).__paint.app;return [false,true].map(white=>Array.from(a.composite(white).getContext('2d').getImageData(0,0,1,1).data));});expect(exportPixels).toEqual([[0,0,0,0],[255,255,255,255]]);
   await page.locator('#fileInput').setInputFiles({name:'bad.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify({...project,layers:[{image:'data:image/png;base64,bad'}]}))});await expect(page.locator('#toast')).toContainText('이미지');expect((await state(page)).layers).toBe(3);
 });

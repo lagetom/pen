@@ -110,9 +110,9 @@ export class Storyboard {
   private serializeCut(cut: Cut): Promise<Project> {
     const p = cut.paint;
     if (!cut.cold) return p.serialize(cut.name);
-    const metadata = p.layers.map(l => ({ name:l.name, visible:l.visible, opacity:l.opacity, blob:cut.cold!.find(f=>f.layer===l)!.image }));
+    const metadata = p.layers.map(l => ({ name:l.name, visible:l.visible, opacity:l.opacity, imageSource:l.imageSource?{...l.imageSource}:undefined, blob:cut.cold!.find(f=>f.layer===l)!.image }));
     const width = p.width, height = p.height, name = cut.name, guide = {...p.guide}, dpi=this.dpi;
-    return Promise.all(metadata.map(async l => ({name:l.name,visible:l.visible,opacity:l.opacity,image:await blobURL(l.blob)}))).then(layers=>({format:'mini-paint',version:1,width,height,name,guide,dpi,layers}));
+    return Promise.all(metadata.map(async l => ({name:l.name,visible:l.visible,opacity:l.opacity,imageSource:l.imageSource,image:await blobURL(l.blob)}))).then(layers=>({format:'mini-paint',version:1,width,height,name,guide,dpi,layers}));
   }
   async serialize(name: string): Promise<ProjectV2> {
     // Every hot cut synchronously clones its canvases before the first await; cold Blobs are immutable.
