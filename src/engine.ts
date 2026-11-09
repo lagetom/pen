@@ -7,9 +7,15 @@ let nextLayerId = 0;
 function layerId() { return `layer-${++nextLayerId}`; }
 export const TILE = 128;
 export const HISTORY_LIMIT = 128 * 1024 * 1024;
-export type Layer = { id: string; name: string; visible: boolean; opacity: number; canvas: HTMLCanvasElement };
+export type ImageSource = { width:number; height:number; name:string };
+export function readImageSource(raw:any):ImageSource|undefined {
+  if(raw===undefined)return;
+  if(!raw||!Number.isInteger(raw.width)||!Number.isInteger(raw.height)||raw.width<1||raw.height<1||raw.width>8192||raw.height>8192||typeof raw.name!=='string'||raw.name.length>100)throw new Error('잘못된 원본 이미지 정보입니다.');
+  return {width:raw.width,height:raw.height,name:raw.name};
+}
+export type Layer = { id: string; name: string; visible: boolean; opacity: number; canvas: HTMLCanvasElement; imageSource?: ImageSource };
 export type Command = { label: string; bytes: number; undo: () => void; redo: () => void; layers?: Layer[] };
-export type Project = { format: 'mini-paint'; version: 1; width: number; height: number; name: string; dpi?: number; guide?: GuideSettings; layers: { name: string; visible: boolean; opacity: number; image: string }[] };
+export type Project = { format: 'mini-paint'; version: 1; width: number; height: number; name: string; dpi?: number; guide?: GuideSettings; layers: { name: string; visible: boolean; opacity: number; image: string; imageSource?: ImageSource }[] };
 export function canvas(w: number, h: number) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
 export function ctx(c: HTMLCanvasElement) { return c.getContext('2d', { willReadFrequently: true })!; }
 export function dimensions(w: number, h: number) {
@@ -36,7 +42,7 @@ export class Paint {
   changed = (_layers?: Layer[]) => {}; render = () => {};
   constructor() { this.reset(1600, 1200); }
   get selected() { return this.layers.find(l => l.id === this.active)!; }
-  makeLayer(name = '레이어') { return { id: layerId(), name, visible: true, opacity: 1, canvas: canvas(this.width, this.height) }; }
+  makeLayer(name = '레이어'): Layer { return { id: layerId(), name, visible: true, opacity: 1, canvas: canvas(this.width, this.height) }; }
   reset(w: number, h: number) { dimensions(w, h); this.cancel(); this.width = w; this.height = h; this.guide = defaultGuide(); this.dpi = 96; this.layers = [this.makeLayer('레이어 1')]; this.active = this.layers[0].id; this.history.clear(); }
   commit(c: Command) { this.history.push(c); this.changed(c.layers); this.render(); }
   structure(label: string, action: () => void, bytes = 0) {
@@ -117,9 +123,9 @@ export class Paint {
   release() { this.cancel(); for (const l of this.referencedLayers()) l.canvas.width = l.canvas.height = 0; this.history.clear(); this.layers = []; }
   async serialize(name: string): Promise<Project> {
     // Capture all canvases synchronously before yielding so edits cannot mix revisions.
-    const copies = this.layers.map(l => ({ name: l.name, visible: l.visible, opacity: l.opacity, copy: (() => { const c = canvas(this.width, this.height); ctx(c).drawImage(l.canvas, 0, 0); return c; })() }));
+    const copies = this.layers.map(l => ({ name: l.name, visible: l.visible, opacity: l.opacity, imageSource:l.imageSource?{...l.imageSource}:undefined, copy: (() => { const c = canvas(this.width, this.height); ctx(c).drawImage(l.canvas, 0, 0); return c; })() }));
     const width = this.width, height = this.height, guide = {...this.guide}, dpi = this.dpi;
-    const layers = await Promise.all(copies.map(async l => ({ name: l.name, visible: l.visible, opacity: l.opacity, image: await dataURL(l.copy) })));
+    const layers = await Promise.all(copies.map(async l => ({ name: l.name, visible: l.visible, opacity: l.opacity, imageSource:l.imageSource, image: await dataURL(l.copy) })));
     return { format: 'mini-paint', version: 1, name, width, height, guide, dpi, layers };
   }
   async decode(raw: unknown) {
@@ -133,6 +139,7 @@ export class Paint {
     const layers: Layer[] = [];
     for (const entry of p.layers) {
       if (!entry || typeof entry !== 'object') throw new Error('잘못된 레이어입니다.');
+      const imageSource=readImageSource(entry.imageSource);
       const image = entry.image ?? entry.dataURL ?? entry.data;
       if (typeof image !== 'string' || image.length > 96e6 || !image.startsWith('data:image/png;base64,')) throw new Error('레이어에 유효한 PNG 데이터가 없습니다.');
       const opacity = entry.opacity ?? 1;
@@ -140,7 +147,7 @@ export class Paint {
       const img = await loadImage(image);
       if (img.width !== w || img.height !== h) throw new Error('레이어와 캔버스 크기가 다릅니다.');
       const c = canvas(w, h); ctx(c).drawImage(img, 0, 0);
-      layers.push({ id: layerId(), name: String(entry.name ?? '레이어').slice(0, 100), visible: entry.visible !== false, opacity, canvas: c });
+      layers.push({ id: layerId(), name: String(entry.name ?? '레이어').slice(0, 100), visible: entry.visible !== false, opacity, canvas: c, imageSource });
     }
     return { width: w, height: h, layers, guide, dpi, name: typeof p.name === 'string' ? p.name.slice(0, 100) : '제목 없음' };
   }

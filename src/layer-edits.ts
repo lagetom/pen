@@ -13,7 +13,7 @@ export function flipLayer(paint:Paint){
 }
 export function duplicateLayer(paint:Paint){
   idle(paint);if(paint.layers.length>=50||(paint.layers.length+1)*paint.width*paint.height>128e6)throw new Error('레이어 개수 또는 메모리 한도를 초과합니다.');
-  const source=paint.selected,layer=paint.makeLayer(`${source.name} 복사`);layer.visible=source.visible;layer.opacity=source.opacity;
+  const source=paint.selected,layer=paint.makeLayer(`${source.name} 복사`);layer.imageSource=source.imageSource?{...source.imageSource}:undefined;layer.visible=source.visible;layer.opacity=source.opacity;
   ctx(layer.canvas).putImageData(ctx(source.canvas).getImageData(0,0,paint.width,paint.height),0,0);
   paint.structure('레이어 복제',()=>{paint.layers.splice(paint.layers.indexOf(source)+1,0,layer);paint.active=layer.id;},paint.width*paint.height*4);
 }
