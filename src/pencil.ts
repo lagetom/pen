@@ -14,8 +14,9 @@ function tip(kind: PencilKind, color: string) {
     const radius = Math.hypot(dx, dy), angle = Math.atan2(dy, dx), noise = random();
     const edge = Math.max(0, Math.min(1, (1 - radius + Math.sin(angle * 11) * .025 + (noise - .5) * .09) * 7));
     const dense = kind === 'dark-pencil';
-    const grain = noise < (dense ? .16 : .34) ? .015 : Math.pow(noise, dense ? 1.1 : 2.1);
-    const alpha = edge * grain * (dense ? .58 : .31);
+    // Graphite point: HB is a narrow, light core; 4B is a broad, flat, dark one. Paper grain is applied at composite time.
+    const body = Math.pow(Math.max(0, 1 - radius * radius), dense ? .45 : 1);
+    const alpha = edge * body * (dense ? .5 * (.7 + .3 * noise) : .42 * (.5 + .5 * noise));
     const i = (y * RESOLUTION + x) * 4;
     pixels.data[i] = rgb[0]; pixels.data[i+1] = rgb[1]; pixels.data[i+2] = rgb[2]; pixels.data[i+3] = Math.round(alpha * 255);
   }

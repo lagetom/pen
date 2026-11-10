@@ -1,4 +1,5 @@
-import { InkStampStroke, feltPath, readTexture, type BasicBrushKind, type BrushTexture } from './basic-brushes';
+import { InkStampStroke, readTexture, type BasicBrushKind, type BrushTexture } from './basic-brushes';
+import { grainSheet, texturedTile } from './paper-grain';
 import { readDpi } from './resolution';
 import { PencilStroke, type PencilKind } from './pencil';
 import { defaultGuide, readGuide, type GuideSettings } from './guides';
@@ -35,11 +36,18 @@ export class History {
   redo() { const c = this.future.pop(); if (c) { c.redo(); this.past.push(c); } return c; }
   clear() { this.past = []; this.future = []; this.bytes = 0; }
 }
+// Paper response per brush. The pen, felt tip and eraser draw without paper texture.
+function paper(kind: PencilKind | BasicBrushKind | null, texture?: BrushTexture) {
+  if (kind === 'pencil') return { sheet: grainSheet(kind), strength: 1, fill: 1 };
+  if (kind === 'dark-pencil') return { sheet: grainSheet(kind), strength: 1, fill: 2 };
+  if (kind === 'rough-ink' || kind === 'ballpoint') { const amount = readTexture(kind, texture).amount / 100; return amount ? { sheet: grainSheet(kind), strength: Math.min(1, kind === 'rough-ink' ? .4 + amount : 2.5 * amount), fill: 1 } : null; }
+  return null;
+}
 export class Paint {
   dpi = 96;
   guide = defaultGuide();
   width = 1600; height = 1200; layers: Layer[] = []; active = ''; history = new History();
-  stroke: null | { layer: Layer; original: HTMLCanvasElement; mask: HTMLCanvasElement; x: number; y: number; size: number; color: string; opacity: number; erase: boolean; pencil: PencilStroke | InkStampStroke | null; kind: PencilKind | BasicBrushKind | null; felt: BrushTexture | null; tiles: Set<string>; pending: Set<string> } = null;
+  stroke: null | { layer: Layer; original: HTMLCanvasElement; mask: HTMLCanvasElement; x: number; y: number; size: number; color: string; opacity: number; erase: boolean; pencil: PencilStroke | InkStampStroke | null; kind: PencilKind | BasicBrushKind | null; grain: { sheet: HTMLCanvasElement; strength: number; fill: number } | null; tiles: Set<string>; pending: Set<string> } = null;
   changed = (_layers?: Layer[]) => {}; render = () => {};
   constructor() { this.reset(1600, 1200); }
   get selected() { return this.layers.find(l => l.id === this.active)!; }
@@ -67,15 +75,14 @@ export class Paint {
     if (this.stroke || !this.selected.visible || this.selected.opacity === 0 || opacity === 0) return false;
     const original = canvas(this.width, this.height); ctx(original).drawImage(this.selected.canvas, 0, 0);
     const mask = canvas(this.width, this.height);
-    this.stroke = { layer: this.selected, original, mask, pencil: !erase && (pencil==='pencil'||pencil==='dark-pencil') ? new PencilStroke(ctx(mask), x, y, size, pencil, color) : !erase && (pencil==='rough-ink'||pencil==='ballpoint') ? new InkStampStroke(ctx(mask),x,y,size,pencil,color,readTexture(pencil,texture).amount) : null, kind:erase?null:pencil, felt:!erase&&pencil==='felt-tip'?readTexture('felt-tip',texture):null, x, y, size, color, opacity, erase, tiles: new Set(), pending: new Set() };
+    this.stroke = { layer: this.selected, original, mask, pencil: !erase && (pencil==='pencil'||pencil==='dark-pencil') ? new PencilStroke(ctx(mask), x, y, size, pencil, color) : !erase && (pencil==='rough-ink'||pencil==='felt-tip'||pencil==='ballpoint') ? new InkStampStroke(ctx(mask),x,y,size,pencil,color,readTexture(pencil,texture).amount) : null, kind:erase?null:pencil, grain:erase?null:paper(pencil,texture), x, y, size, color, opacity, erase, tiles: new Set(), pending: new Set() };
     this.point(x, y, true); return true;
   }
   point(x: number, y: number, dot = false) {
     const s = this.stroke; if (!s || !Number.isFinite(x + y)) return;
     if (s.pencil) { if (!dot) s.pencil.point(x, y); } else {
       const m = ctx(s.mask); m.fillStyle = m.strokeStyle = s.color; m.lineWidth = s.size; m.lineCap = m.lineJoin = 'round';
-      if(s.felt)feltPath(m,x,y,s.x,s.y,s.size,dot,s.felt);
-      else if (dot) { m.beginPath(); m.arc(x, y, s.size / 2, 0, Math.PI * 2); m.fill(); }
+      if (dot) { m.beginPath(); m.arc(x, y, s.size / 2, 0, Math.PI * 2); m.fill(); }
       else if (x !== s.x || y !== s.y) { m.beginPath(); m.moveTo(s.x, s.y); m.lineTo(x, y); m.stroke(); }
     }
     const r = s.size / 2 + 2;
@@ -92,12 +99,15 @@ export class Paint {
       const [tx, ty] = tile.split(',').map(Number), x = tx * TILE, y = ty * TILE, w = Math.min(TILE, this.width - x), h = Math.min(TILE, this.height - y);
       c.clearRect(x, y, w, h); c.drawImage(s.original, x, y, w, h, x, y, w, h);
       c.globalAlpha = s.opacity; c.globalCompositeOperation = s.erase ? 'destination-out' : 'source-over';
-      c.drawImage(s.mask, x, y, w, h, x, y, w, h); c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+      if (s.grain) c.drawImage(texturedTile(s.mask, x, y, w, h, s.grain.sheet, s.grain.strength, s.grain.fill), 0, 0, w, h, x, y, w, h);
+      else c.drawImage(s.mask, x, y, w, h, x, y, w, h);
+      c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
     }
     s.pending.clear();
   }
   end() {
-    if (!this.stroke) return; this.flush(); const s = this.stroke, layer = s.layer; this.stroke = null;if(s.pencil instanceof InkStampStroke)s.pencil.release();
+    if (!this.stroke) return; if (this.stroke.pencil instanceof InkStampStroke && this.stroke.pencil.settle()) for (const tile of this.stroke.tiles) this.stroke.pending.add(tile);
+    this.flush(); const s = this.stroke, layer = s.layer; this.stroke = null;if(s.pencil instanceof InkStampStroke)s.pencil.release();
     const patches: { x: number; y: number; before: ImageData; after: ImageData }[] = [];
     for (const tile of s.tiles) {
       const [tx, ty] = tile.split(',').map(Number), x = tx * TILE, y = ty * TILE, w = Math.min(TILE, this.width - x), h = Math.min(TILE, this.height - y);
