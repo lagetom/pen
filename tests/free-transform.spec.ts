@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { menu } from './ui';
 import { initializeCanvas, readPsd } from 'ag-psd';
 initializeCanvas(()=>{throw new Error('PSD parsing must use ImageData');},(width,height)=>({width,height,data:new Uint8ClampedArray(width*height*4)} as ImageData));
 async function ready(p:Page){await p.waitForFunction(()=>!!(window as any).__paint && !(window as any).__paint.busy);}
@@ -8,7 +9,7 @@ async function start(p:Page){await p.locator('#stage').focus();await p.keyboard.
 async function seed(p:Page){await p.evaluate(()=>{const a=(window as any).__paint.app,g=a.selected.canvas.getContext('2d');g.fillStyle='#ff0000';g.fillRect(16,16,32,16);g.clearRect(20,20,4,4);g.fillStyle='rgba(0,0,255,.5)';g.fillRect(24,20,4,4);a.changed();a.render();a.history.clear();});}
 async function canvasPoint(p:Page,x:number,y:number){return p.evaluate(({x,y})=>{const p=(window as any).__paint,r=document.getElementById('paper')!.getBoundingClientRect();return {x:r.x+(p.mirrored?p.app.width-x:x)*p.zoom,y:r.y+y*p.zoom};},{x,y});}
 async function pixel(p:Page,x:number,y:number){return p.evaluate(({x,y})=>Array.from((window as any).__paint.app.selected.canvas.getContext('2d').getImageData(x,y,1,1).data),{x,y});}
-test.beforeEach(async({page})=>{await page.goto('/');await ready(page);await page.locator('#new').click();await page.locator('#newWidth').fill('128');await page.locator('#newHeight').fill('96');await page.locator('#createDocument').click();await seed(page);});
+test.beforeEach(async({page})=>{await page.goto('/');await ready(page);await menu(page,'new');await page.locator('#newWidth').fill('128');await page.locator('#newHeight').fill('96');await page.locator('#createDocument').click();await seed(page);});
 
 test('레이어 자유 변형 크기·비율·%·각도, 실시간 픽셀과 한 단계 Undo/Redo',async({page})=>{
   const before=await pixels(page);await start(page);expect(await state(page)).toEqual({cx:32,cy:24,width:32,height:16,angle:0});

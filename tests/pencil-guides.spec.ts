@@ -1,7 +1,8 @@
 import {test,expect,Page} from '@playwright/test';
+import { openGuides } from './ui';
 async function dot(page:Page,x:number,y:number){const r=(await page.locator('#paper').boundingBox())!,z=await page.evaluate(()=>(window as any).__paint.zoom);await page.mouse.click(r.x+x*z,r.y+y*z);}
 async function setRange(page:Page,id:string,value:string){await page.locator(`#${id}`).fill(value);await page.locator(`#${id}`).dispatchEvent('input');}
-test.beforeEach(async({page})=>{await page.goto('/');await page.waitForFunction(()=>!!(window as any).__paint);});
+test.beforeEach(async({page})=>{await page.goto('/');await page.waitForFunction(()=>!!(window as any).__paint);await openGuides(page);});
 test('연필 점 25회·작은 원 25회 실제 포인터 입력',async({page})=>{
   const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));await page.locator('#brushTool').selectOption('pencil');
   for(let i=0;i<25;i++)await dot(page,80+i%20*24,80+Math.floor(i/20)*24);

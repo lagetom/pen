@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { menu } from './ui';
 import { readFile } from 'node:fs/promises';
 
 async function ready(page: Page) { await page.waitForFunction(() => !!(window as any).__paint && !(window as any).__paint.busy); }
@@ -13,7 +14,7 @@ async function pixel(page: Page,x:number,y:number,layer?:number) { return page.e
 async function selection(page: Page) { return page.evaluate(()=>(window as any).__paint.selection); }
 async function seed(page: Page) { await page.evaluate(()=>{const a=(window as any).__paint.app,g=a.selected.canvas.getContext('2d');g.fillStyle='#ff0000';g.fillRect(10,10,8,8);g.fillStyle='rgba(0,0,255,.5)';g.fillRect(22,10,4,4);g.fillStyle='#00ff00';g.fillRect(80,60,8,8);a.changed();a.render();}); }
 async function choose(page:Page) { await page.locator('#stage').focus();await page.keyboard.press('s');await drag(page,[8,8],[30,26]); }
-test.beforeEach(async({page})=>{await page.goto('/');await ready(page);await page.locator('#new').click();await page.locator('#newWidth').fill('128');await page.locator('#newHeight').fill('96');await page.locator('#createDocument').click();});
+test.beforeEach(async({page})=>{await page.goto('/');await ready(page);await menu(page,'new');await page.locator('#newWidth').fill('128');await page.locator('#newHeight').fill('96');await page.locator('#createDocument').click();});
 
 test('사각 선택 이동은 선택 내부만 편집, 투명·미리보기·단일 Undo/Redo',async({page})=>{
   await seed(page);const before=await signature(page);await choose(page);expect(await selection(page)).toEqual({x:8,y:8,width:22,height:18});
@@ -77,8 +78,8 @@ test('패널 340px 기본값·범위·포인터 취소·접기·설정 복원·�
   await handle.focus();for(let i=0;i<13;i++)await page.keyboard.press('ArrowRight');expect((await sidebar.boundingBox())!.width).toBe(280);
   box=(await handle.boundingBox())!;await page.mouse.move(box.x+4,box.y+80);await page.mouse.down();await page.mouse.move(box.x-50,box.y+80);await handle.dispatchEvent('pointercancel',{pointerId:1});await page.mouse.up();expect((await sidebar.boundingBox())!.width).toBe(280);
   await page.locator('#layerDensity').selectOption('compact');expect((await page.locator('.layer-row').boundingBox())!.height).toBe(36);
-  await page.locator('#brushSettings summary').click();await page.locator('#screenSettings summary').click();await page.locator('#toggleSidebar').click();await expect(sidebar).toBeHidden();
-  page.on('dialog',d=>void d.accept());await page.reload();await ready(page);await expect(sidebar).toBeHidden();await page.locator('#toggleSidebar').click();expect((await sidebar.boundingBox())!.width).toBe(280);await expect(page.locator('#layerDensity')).toHaveValue('compact');await expect(page.locator('#brushSettings')).not.toHaveAttribute('open');await expect(page.locator('#screenSettings')).not.toHaveAttribute('open');
+  await expect(page.locator('#screenSettings')).not.toHaveAttribute('open');await page.locator('#screenSettings summary').click();await page.locator('#toggleSidebar').click();await expect(sidebar).toBeHidden();
+  page.on('dialog',d=>void d.accept());await page.reload();await ready(page);await expect(sidebar).toBeHidden();await page.locator('#toggleSidebar').click();expect((await sidebar.boundingBox())!.width).toBe(280);await expect(page.locator('#layerDensity')).toHaveValue('compact');await expect(page.locator('#screenSettings')).toHaveAttribute('open');
 });
 
 test('레이어 드래그 순서 Undo·활성 행 스크롤·썸네일 캐시와 스트로크 비용',async({page})=>{

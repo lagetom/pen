@@ -1,4 +1,5 @@
 import {test,expect,Page} from '@playwright/test';
+import { menu, openGuides } from './ui';
 import {readFile} from 'node:fs/promises';
 async function ready(page:Page){await page.waitForFunction(()=>!!(window as any).__paint && !(window as any).__paint.busy);}
 async function point(page:Page,x:number,y:number){return page.evaluate(({x,y})=>{const p=(window as any).__paint,r=document.getElementById('paper')!.getBoundingClientRect();return {x:r.x+(p.mirrored?p.app.width-x:x)*p.zoom,y:r.y+y*p.zoom};},{x,y});}
@@ -6,7 +7,7 @@ async function pixel(page:Page,x:number,y:number){return page.evaluate(({x,y})=>
 async function signature(page:Page){return page.evaluate(()=>(window as any).__paint.app.selected.canvas.toDataURL());}
 async function clickPoint(page:Page,x:number,y:number){const p=await point(page,x,y);await page.mouse.click(p.x,p.y);}
 async function drag(page:Page,from:[number,number],to:[number,number]){const a=await point(page,...from),b=await point(page,...to);await page.mouse.move(a.x,a.y);await page.mouse.down();await page.mouse.move(b.x,b.y);await page.mouse.up();}
-test.beforeEach(async({page})=>{await page.goto('/');await ready(page);await page.locator('#new').click();await page.locator('#newWidth').fill('128');await page.locator('#newHeight').fill('96');await page.locator('#createDocument').click();});
+test.beforeEach(async({page})=>{await page.goto('/');await ready(page);await menu(page,'new');await page.locator('#newWidth').fill('128');await page.locator('#newHeight').fill('96');await page.locator('#createDocument').click();await openGuides(page);});
 test('M 보기 반전은 픽셀·프로젝트·히스토리 불변, PNG도 원래 방향',async({page})=>{
   await page.evaluate(()=>{const a=(window as any).__paint.app,g=a.selected.canvas.getContext('2d');g.fillStyle='#ff0000';g.fillRect(10,20,10,10);a.add();const h=a.selected.canvas.getContext('2d');h.fillStyle='#0000ff';h.fillRect(70,40,10,10);a.changed();a.render();});
   const before=await page.evaluate(async()=>{const p=(window as any).__paint;return {project:await p.story.serialize('동일'),history:p.app.history.past.length,revision:p.revision,png:p.app.composite().toDataURL()};});
