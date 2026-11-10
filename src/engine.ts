@@ -1,3 +1,4 @@
+import { InkStampStroke, feltPath, readTexture, type BasicBrushKind, type BrushTexture } from './basic-brushes';
 import { readDpi } from './resolution';
 import { PencilStroke, type PencilKind } from './pencil';
 import { defaultGuide, readGuide, type GuideSettings } from './guides';
@@ -38,7 +39,7 @@ export class Paint {
   dpi = 96;
   guide = defaultGuide();
   width = 1600; height = 1200; layers: Layer[] = []; active = ''; history = new History();
-  stroke: null | { layer: Layer; original: HTMLCanvasElement; mask: HTMLCanvasElement; x: number; y: number; size: number; color: string; opacity: number; erase: boolean; pencil: PencilStroke | null; tiles: Set<string>; pending: Set<string> } = null;
+  stroke: null | { layer: Layer; original: HTMLCanvasElement; mask: HTMLCanvasElement; x: number; y: number; size: number; color: string; opacity: number; erase: boolean; pencil: PencilStroke | InkStampStroke | null; kind: PencilKind | BasicBrushKind | null; felt: BrushTexture | null; tiles: Set<string>; pending: Set<string> } = null;
   changed = (_layers?: Layer[]) => {}; render = () => {};
   constructor() { this.reset(1600, 1200); }
   get selected() { return this.layers.find(l => l.id === this.active)!; }
@@ -62,18 +63,19 @@ export class Paint {
     if (this.stroke || l[key] === value) return; const before = l[key]; l[key] = value;
     this.commit({ label: '레이어 속성 변경', bytes: 0, layers: [l], undo: () => { l[key] = before; }, redo: () => { l[key] = value; } });
   }
-  begin(x: number, y: number, size: number, color: string, opacity: number, erase: boolean, pencil: PencilKind | null = null) {
+  begin(x: number, y: number, size: number, color: string, opacity: number, erase: boolean, pencil: PencilKind | BasicBrushKind | null = null, texture?: BrushTexture) {
     if (this.stroke || !this.selected.visible || this.selected.opacity === 0 || opacity === 0) return false;
     const original = canvas(this.width, this.height); ctx(original).drawImage(this.selected.canvas, 0, 0);
     const mask = canvas(this.width, this.height);
-    this.stroke = { layer: this.selected, original, mask, pencil: pencil && !erase ? new PencilStroke(ctx(mask), x, y, size, pencil, color) : null, x, y, size, color, opacity, erase, tiles: new Set(), pending: new Set() };
+    this.stroke = { layer: this.selected, original, mask, pencil: !erase && (pencil==='pencil'||pencil==='dark-pencil') ? new PencilStroke(ctx(mask), x, y, size, pencil, color) : !erase && (pencil==='rough-ink'||pencil==='ballpoint') ? new InkStampStroke(ctx(mask),x,y,size,pencil,color,readTexture(pencil,texture).amount) : null, kind:erase?null:pencil, felt:!erase&&pencil==='felt-tip'?readTexture('felt-tip',texture):null, x, y, size, color, opacity, erase, tiles: new Set(), pending: new Set() };
     this.point(x, y, true); return true;
   }
   point(x: number, y: number, dot = false) {
     const s = this.stroke; if (!s || !Number.isFinite(x + y)) return;
     if (s.pencil) { if (!dot) s.pencil.point(x, y); } else {
       const m = ctx(s.mask); m.fillStyle = m.strokeStyle = s.color; m.lineWidth = s.size; m.lineCap = m.lineJoin = 'round';
-      if (dot) { m.beginPath(); m.arc(x, y, s.size / 2, 0, Math.PI * 2); m.fill(); }
+      if(s.felt)feltPath(m,x,y,s.x,s.y,s.size,dot,s.felt);
+      else if (dot) { m.beginPath(); m.arc(x, y, s.size / 2, 0, Math.PI * 2); m.fill(); }
       else if (x !== s.x || y !== s.y) { m.beginPath(); m.moveTo(s.x, s.y); m.lineTo(x, y); m.stroke(); }
     }
     const r = s.size / 2 + 2;
@@ -95,7 +97,7 @@ export class Paint {
     s.pending.clear();
   }
   end() {
-    if (!this.stroke) return; this.flush(); const s = this.stroke, layer = s.layer; this.stroke = null;
+    if (!this.stroke) return; this.flush(); const s = this.stroke, layer = s.layer; this.stroke = null;if(s.pencil instanceof InkStampStroke)s.pencil.release();
     const patches: { x: number; y: number; before: ImageData; after: ImageData }[] = [];
     for (const tile of s.tiles) {
       const [tx, ty] = tile.split(',').map(Number), x = tx * TILE, y = ty * TILE, w = Math.min(TILE, this.width - x), h = Math.min(TILE, this.height - y);
@@ -104,9 +106,9 @@ export class Paint {
     }
     s.original.width = s.original.height = s.mask.width = s.mask.height = 0;
     if (!patches.length) { this.render(); return; }
-    this.commit({ label: s.erase ? '지우개' : s.pencil ? '연필 스트로크' : '펜 스트로크', layers: [layer], bytes: patches.reduce((n, p) => n + p.before.data.byteLength * 2, 0), undo: () => patches.forEach(p => ctx(layer.canvas).putImageData(p.before, p.x, p.y)), redo: () => patches.forEach(p => ctx(layer.canvas).putImageData(p.after, p.x, p.y)) });
+    this.commit({ label: s.erase ? '지우개' : s.kind==='rough-ink'?'거친 잉크펜':s.kind==='felt-tip'?'싸인펜':s.kind==='ballpoint'?'볼펜':s.pencil ? '연필 스트로크' : '펜 스트로크', layers: [layer], bytes: patches.reduce((n, p) => n + p.before.data.byteLength * 2, 0), undo: () => patches.forEach(p => ctx(layer.canvas).putImageData(p.before, p.x, p.y)), redo: () => patches.forEach(p => ctx(layer.canvas).putImageData(p.after, p.x, p.y)) });
   }
-  cancel() { const s = this.stroke; if (!s) return; const c = ctx(s.layer.canvas); c.clearRect(0, 0, this.width, this.height); c.drawImage(s.original, 0, 0); s.original.width = s.original.height = s.mask.width = s.mask.height = 0; this.stroke = null; this.render(); }
+  cancel() { const s = this.stroke; if (!s) return; const c = ctx(s.layer.canvas); c.clearRect(0, 0, this.width, this.height); c.drawImage(s.original, 0, 0); s.original.width = s.original.height = s.mask.width = s.mask.height = 0;if(s.pencil instanceof InkStampStroke)s.pencil.release(); this.stroke = null; this.render(); }
   clearLayer() {
     if (this.stroke) return; const l = this.selected, before = ctx(l.canvas).getImageData(0, 0, this.width, this.height);
     if (!before.data.some((v, i) => i % 4 === 3 && v)) return;
