@@ -1,9 +1,10 @@
 import {test,expect,Page} from '@playwright/test';
+import { openGuides } from './ui';
 async function ready(page:Page){await page.waitForFunction(()=>!!(window as any).__paint && !(window as any).__paint.busy);}
 async function act(page:Page,id:string){await page.locator(`#${id}`).click();await ready(page);}
 async function select(page:Page,index:number){await page.locator('.cut-card').nth(index).click();await ready(page);}
 async function dot(page:Page){const r=(await page.locator('#paper').boundingBox())!,z=await page.evaluate(()=>(window as any).__paint.zoom);await page.mouse.click(r.x+100*z,r.y+100*z);}
-test.beforeEach(async({page})=>{await page.goto('/');await ready(page);});
+test.beforeEach(async({page})=>{await page.goto('/');await ready(page);await openGuides(page);});
 test('연필·컷 복제·가이드·비활성 컷 복원·v2 저장을 함께 사용',async({page})=>{
   const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));await page.locator('#brushTool').selectOption('pencil');await page.locator('#guideType').selectOption('grid');await dot(page);
   const original=await page.evaluate(()=>(window as any).__paint.app.selected.canvas.toDataURL());

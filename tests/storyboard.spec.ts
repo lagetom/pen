@@ -1,6 +1,7 @@
 import {test,expect,Page} from '@playwright/test';
+import { menu } from './ui';
 async function ready(page:Page){await page.waitForFunction(()=>!(window as any).__paint.busy);}
-async function act(page:Page,id:string){await page.locator(`#${id}`).click();await ready(page);}
+async function act(page:Page,id:string){if(id==='new')await menu(page,id);else await page.locator(`#${id}`).click();await ready(page);}
 async function select(page:Page,index:number){await page.locator('.cut-card').nth(index).click();await ready(page);}
 async function dot(page:Page,x=100,y=100){const r=(await page.locator('#paper').boundingBox())!,z=await page.evaluate(()=>(window as any).__paint.zoom);await page.mouse.click(r.x+x*z,r.y+y*z);}
 async function pixel(page:Page,x=100,y=100){return page.evaluate(({x,y})=>Array.from((window as any).__paint.app.selected.canvas.getContext('2d').getImageData(x,y,1,1).data),{x,y});}
