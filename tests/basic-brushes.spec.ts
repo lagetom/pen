@@ -25,7 +25,7 @@ test('고정 질감 재현·입력 분할/프레임 독립·1px 점·취소·화
     for(const kind of b.BASIC_BRUSHES){b.clearBasicBrushCache();const a=draw(kind,true,false),sig=a.selected.canvas.toDataURL();b.clearBasicBrushCache();const rebuilt=draw(kind,true,true),single=draw(kind,false,false);let missing=0;
       for(const offset of [0,.25,.5,.75]){const p=new Paint();p.reset(16,16);p.begin(8+offset,8+offset,1,'#283747',1,false,kind);p.end();if(!p.selected.canvas.getContext('2d')!.getImageData(0,0,16,16).data.some((v,i)=>i%4===3&&v))missing++;p.release();}
       a.begin(12,12,8,'#ff0000',1,false,kind);a.point(120,110);a.flush();a.cancel();const cancel=a.selected.canvas.toDataURL()===sig;
-      const outside=draw(kind,false,false);outside.begin(5,80,3,'#000000',1,false,kind);outside.point(1e6,80);outside.point(10,80);outside.end();const otherTexture=draw(kind,true,false,90).selected.canvas.toDataURL();results.push({kind,same:sig===rebuilt.selected.canvas.toDataURL(),segmented:kind==='felt-tip'||sig===single.selected.canvas.toDataURL(),cancel,missing,textureChanges:otherTexture!==sig});a.release();rebuilt.release();single.release();outside.release();
+      const outside=draw(kind,false,false);outside.begin(5,80,3,'#000000',1,false,kind);outside.point(1e6,80);outside.point(10,80);outside.end();const otherTexture=draw(kind,true,false,90).selected.canvas.toDataURL();results.push({kind,same:sig===rebuilt.selected.canvas.toDataURL(),segmented:sig===single.selected.canvas.toDataURL(),cancel,missing,textureChanges:otherTexture!==sig});a.release();rebuilt.release();single.release();outside.release();
     }return {results,pinned:b.basicBrushCacheStats().pinned};});
   expect(result.pinned).toBe(0);for(const r of result.results){expect(r.same&&r.segmented&&r.cancel&&r.textureChanges).toBe(true);expect(r.missing).toBe(0);}
 });
@@ -33,7 +33,24 @@ test('고정 질감 재현·입력 분할/프레임 독립·1px 점·취소·화
 test('표현 특성: 잉크 중심부·볼펜 얇은 선·싸인펜 부드러운 경계와 획 불투명도',async({page})=>{
   const quality=await page.evaluate(async()=>{const {Paint}=await import('/src/engine.ts');function line(kind:any,size:number,opacity=1){const p=new Paint();p.reset(160,80);p.begin(20.25,40.25,size,'#283747',opacity,false,kind);p.point(140.25,40.25);p.point(20.25,40.25);p.end();return p;}
     const rough=line('rough-ink',8),ball=line('ballpoint',3,.9),pen=line(null,12),felt=line('felt-tip',12),half=line('felt-tip',12,.5);function data(p:Paint){return p.selected.canvas.getContext('2d')!.getImageData(0,0,160,80).data;}const r=data(rough),b=data(ball),p=data(pen),f=data(felt);const count=(a:Uint8ClampedArray,partial=false)=>a.filter((v,i)=>i%4===3&&(partial?v>0&&v<255:v>0)).length;
-    const center=rough.selected.canvas.getContext('2d')!.getImageData(80,40,1,1).data[3],alpha=half.selected.canvas.getContext('2d')!.getImageData(80,40,1,1).data[3];return {center,alpha,ballThin:count(b)<count(r),softEdges:count(f,true)>count(p,true)};});expect(quality).toEqual({center:255,alpha:128,ballThin:true,softEdges:true});
+    const center=rough.selected.canvas.getContext('2d')!.getImageData(80,40,1,1).data[3],full=felt.selected.canvas.getContext('2d')!.getImageData(80,40,1,1).data[3],alpha=Math.abs(half.selected.canvas.getContext('2d')!.getImageData(80,40,1,1).data[3]*2-full)<=3&&full>=240;return {center,alpha,ballThin:count(b)<count(r),softEdges:count(f,true)>count(p,true)};});expect(quality).toEqual({center:255,alpha:true,ballThin:true,softEdges:true});
+});
+
+test('6종 8px 구분: 균일한 펜·HB/4B 농도·잉크펜 외곽/중심·싸인펜 테두리·볼펜 농도 변화·탭 점',async({page})=>{
+  const m=await page.evaluate(async()=>{const {Paint}=await import('/src/engine.ts');const out:Record<string,any>={};
+    for(const kind of [null,'pencil','dark-pencil','rough-ink','felt-tip','ballpoint'] as const){const p=new Paint();p.reset(256,64);p.begin(20.5,32.5,8,'#283747',1,false,kind);for(let x=22;x<=236;x+=2)p.point(x+.5,32.5);p.end();
+      const d=p.selected.canvas.getContext('2d')!.getImageData(0,0,256,64).data,A=(x:number,y:number)=>d[(y*256+x)*4+3],widths:number[]=[],centre:number[]=[],rim:number[]=[];let sum=0,partial=0,inked=0;
+      for(let x=40;x<216;x++){let w=0;for(let y=20;y<45;y++){const a=A(x,y);if(a>127)w++;sum+=a;if(a>0){inked++;if(a<255)partial++;}}widths.push(w);centre.push(A(x,32));rim.push(A(x,30));}
+      const mean=(a:number[])=>a.reduce((n,v)=>n+v,0)/a.length,sd=(a:number[])=>{const c=mean(a);return Math.sqrt(mean(a.map(v=>(v-c)**2)));};
+      const t=new Paint();t.reset(32,32);t.begin(16,16,8,'#283747',1,false,kind);t.end();const tap=t.selected.canvas.getContext('2d')!.getImageData(16,16,1,1).data[3];t.release();p.release();
+      out[kind??'pen']={ink:sum/176,partial:partial/inked,widthSd:sd(widths),centre:mean(centre),centreSd:sd(centre),centreMin:Math.min(...centre),solid:centre.filter(v=>v>=250).length/centre.length,rim:mean(rim),tap};
+    }return out;});
+  expect(m.pen.widthSd).toBe(0);expect(m.pen.solid).toBe(1);
+  expect(m.pencil.ink).toBeLessThan(m['dark-pencil'].ink*.6);expect(m.pencil.centre).toBeLessThan(m['dark-pencil'].centre-60);
+  expect(m['rough-ink'].widthSd).toBeGreaterThan(.5);expect(m['rough-ink'].solid).toBeGreaterThan(.7);expect(m['rough-ink'].partial).toBeLessThan(.7);
+  expect(m['felt-tip'].widthSd).toBeLessThan(.2);expect(m['felt-tip'].centreSd).toBeLessThan(3);expect(m['felt-tip'].centre).toBeGreaterThan(200);expect(m['felt-tip'].centre).toBeLessThan(245);expect(m['felt-tip'].rim).toBeGreaterThan(m['felt-tip'].centre);expect(m['felt-tip'].partial).toBeGreaterThan(.9);
+  expect(m.ballpoint.centreSd).toBeGreaterThan(10);expect(m.ballpoint.centreMin).toBeLessThan(m.ballpoint.centre-40);expect(m.ballpoint.centre).toBeLessThan(215);
+  expect(m['felt-tip'].tap).toBeGreaterThan(120);expect(m.ballpoint.tap).toBeGreaterThan(120);expect(m['rough-ink'].tap).toBeGreaterThan(200);
 });
 
 test('7종 독립 설정·고유 질감·단일/세트 프리셋·v1/v2 마이그레이션·v3',async({page})=>{
