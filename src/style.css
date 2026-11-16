@@ -273,6 +273,14 @@ dialog button.primary { border-color: var(--accent); background: var(--accent); 
 #brushTestCards h3 { font-size: 12px; font-weight: 500; margin-bottom: 8px; }
 .brush-test-canvas { display: block; width: 100%; height: auto; background: #fff; outline: 1px solid var(--line); touch-action: none; cursor: crosshair; }
 .brush-test-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+#splitDialog { width: 700px; }
+.split-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-bottom: 10px; color: var(--muted); }
+.split-controls label { display: flex; align-items: center; gap: 5px; }
+.split-controls input[type=number] { width: 48px; }
+#splitPreview { display: block; max-width: 100%; height: auto; margin: 0 auto; border: 1px solid var(--line); touch-action: none; cursor: pointer; }
+#splitPieces { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; color: var(--muted); }
+#splitPieces label { display: flex; align-items: center; gap: 4px; }
+#splitInfo { margin-right: auto; align-self: center; color: var(--faint); font-size: 11px; }
 
 /* Narrow windows: keep the canvas usable; panels stay collapsible. */
 @media (max-width: 900px) {

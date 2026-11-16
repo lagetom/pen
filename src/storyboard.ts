@@ -1,4 +1,5 @@
 import { readDpi } from './resolution';
+import { fitPiece, type Piece } from './image-split';
 import { Paint, canvas, ctx, blob, blobURL, loadImage, dimensions, HISTORY_LIMIT, type Layer, type Project } from './engine';
 export const MAX_CUTS = 30;
 export const HOT_PIXELS = 32_000_000;
@@ -88,6 +89,29 @@ export class Storyboard {
     cut.view = this.current.view ? {...this.current.view} : null; cut.thumbnail = preview(p);
     const previous = this.current; this.cuts.splice(this.cuts.indexOf(previous)+1,0,cut); this.current = cut;
     try { await this.reconcile(); } catch (e) { this.cuts.splice(this.cuts.indexOf(cut),1); this.current = previous; p.release(); await this.thaw(previous); throw e; }
+  }
+  /** One new cut per piece, inserted after the current cut: the piece as a reference layer under an empty drawing layer. */
+  async addImageCuts(image: CanvasImageSource, sourceName: string, pieces: Piece[], enlarge: boolean) {
+    if (!pieces.length) throw new Error('컷으로 만들 조각을 선택하세요.');
+    if (this.cuts.length + pieces.length > MAX_CUTS) throw new Error(`컷은 최대 ${MAX_CUTS}개까지 만들 수 있습니다. 현재 ${this.cuts.length}개에 ${pieces.length}개를 추가할 수 없습니다.`);
+    const previous = this.current, at = this.cuts.indexOf(previous) + 1, added: Cut[] = [];
+    try {
+      for (const piece of pieces) {
+        const p = new Paint(); p.reset(this.width, this.height); p.dpi = this.dpi;
+        const base = p.selected, target = fitPiece(piece.sw, piece.sh, this.width, this.height, enlarge), g = ctx(base.canvas);
+        base.name = `원본 조각 ${piece.index + 1}`; base.imageSource = { width: piece.sw, height: piece.sh, name: sourceName.slice(0, 100) };
+        g.imageSmoothingQuality = 'high'; g.drawImage(image, piece.sx, piece.sy, piece.sw, piece.sh, target.x, target.y, target.width, target.height);
+        const top = p.makeLayer('다시 그리기'); p.layers.push(top); p.active = top.id;
+        const cut = makeCut(p, `조각 ${piece.index + 1}`); while (this.cuts.some(c => c.id === cut.id)) cut.id = `cut-${++sequence}`;
+        this.cuts.splice(at + added.length, 0, cut); added.push(cut);
+        // Compress each new cut before building the next, so memory holds one full-size piece at a time.
+        await this.freeze(cut);
+      }
+      await this.thaw(added[0]); this.current = added[0]; await this.reconcile();
+    } catch (e) {
+      for (const cut of added) { this.cuts.splice(this.cuts.indexOf(cut), 1); cut.paint.release(); cut.cold = null; }
+      this.current = previous; await this.thaw(previous); throw e;
+    }
   }
   async remove() {
     if (this.cuts.length <= 1) throw new Error('컷은 최소 1개가 필요합니다.');
