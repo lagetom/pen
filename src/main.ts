@@ -17,6 +17,7 @@ import { mmToPx, pxToMm, readDpi } from './resolution';
 import { importPresets, loadPresets, savePresets, presetId, presetFile, type ToolSetPreset, type UserPreset } from './user-presets';
 import { readGuide, renderGuide } from './guides';
 import { Storyboard, thumbnailCanvas } from './storyboard';
+import { imageSplitDialog } from './image-split';
 import { PRESETS, ratio, readPreset, rememberPreset } from './presets';
 import { Paint, canvas, ctx, loadImage, blob, dimensions, HISTORY_LIMIT } from './engine';
 const icons: Record<string, string> = {
@@ -64,7 +65,7 @@ const rule = '<hr>';
 document.querySelector('#app')!.innerHTML = `
 <header class="menubar"><a class="brand" href="./" aria-label="Mini Paint 홈">${icon('pen')}<span>Mini Paint</span></a>
 <nav class="menus" aria-label="메뉴">
-${menu('파일', [own('new','새 캔버스','Ctrl+N'), own('open','열기','Ctrl+O'), run('save','저장','Ctrl+S'), own('saveAs','다른 이름으로 저장','Ctrl+Shift+S'), rule, own('import','PNG 이미지 가져오기'), run('export','내보내기 (PNG · PSD)')])}
+${menu('파일', [own('new','새 캔버스','Ctrl+N'), own('open','열기','Ctrl+O'), run('save','저장','Ctrl+S'), own('saveAs','다른 이름으로 저장','Ctrl+Shift+S'), rule, own('import','PNG 이미지 가져오기'), own('splitImport','이미지를 컷으로 분할'), run('export','내보내기 (PNG · PSD)')])}
 ${menu('편집', [run('undo','실행 취소','Ctrl+Z'), run('redo','다시 실행','Ctrl+Y'), rule, run('cutSelection','잘라내기','Ctrl+X'), run('copySelection','복사','Ctrl+C'), run('pasteSelection','붙여넣기','Ctrl+V'), run('clearSelection','선택 내용 지우기','Delete'), rule, run('selectAll','전체 선택','Ctrl+A'), run('deselect','선택 해제','Ctrl+D'), rule, run('freeTransform','자유 변형','Ctrl+T')])}
 ${menu('보기', [run('zoomIn','확대','Ctrl++'), run('zoomOut','축소','Ctrl+−'), run('zoomValue','100%로 보기'), run('fit','화면 맞춤','Ctrl+0'), rule, run('mirrorView','보기 좌우 반전','M','mirror'), run('whiteBackground','흰색 배경으로 보기','','white'), rule, own('toggleRailLabels','도구 이름 표시','','railLabels'), run('toggleCuts','컷 목록 표시','','cuts'), run('toggleSidebar','레이어 패널 표시','','sidebar')])}
 ${menu('레이어', [run('addLayer','새 레이어'), run('duplicateLayer','레이어 복제'), rule, run('layerUp','위로 이동'), run('layerDown','아래로 이동'), run('renameLayer','이름 변경'), run('deleteLayer','레이어 삭제'), rule, run('flipLayer','레이어 좌우 반전'), run('invertRGB','RGB 반전')])}
@@ -97,7 +98,7 @@ ${menu('설정', [own('settings','환경 설정 · 프리셋'), own('brushTest',
 <div class="slider-row"><label for="guideSpacing">간격</label><input id="guideSpacing" type="range" min="8" max="64" value="24"><input id="guideSpacingNumber" data-range="guideSpacing" class="numeric" type="number" min="8" max="64" aria-label="가이드 간격 숫자"><span class="numeric-unit">px</span><output hidden id="guideSpacingValue">24 px</output></div>
 <div class="slider-row"><label for="guideOpacity">진하기</label><input id="guideOpacity" type="range" min="10" max="80" value="30"><input id="guideOpacityNumber" data-range="guideOpacity" class="numeric" type="number" min="10" max="80" aria-label="가이드 진하기 숫자"><span class="numeric-unit">%</span><output hidden id="guideOpacityValue">30%</output></div>
 <small>배경과 가이드는 PNG·PSD 픽셀에 포함되지 않습니다.</small></section></details></aside></div>
-<div id="toast" role="status" hidden></div><input id="fileInput" type="file" accept=".mpaint,.json,application/json" hidden><input id="imageInput" type="file" accept="image/png" hidden>
+<div id="toast" role="status" hidden></div><input id="fileInput" type="file" accept=".mpaint,.json,application/json" hidden><input id="imageInput" type="file" accept="image/png" hidden><input id="splitInput" type="file" accept="image/png,image/jpeg,image/webp" hidden>
 <dialog id="newDialog"><form method="dialog"><h2>새 캔버스</h2><p>저장하지 않은 작업이 있으면 바꾸기 전에 확인합니다.</p><label class="preset-label" for="canvasPreset">캔버스 프리셋</label><select id="canvasPreset">${PRESETS.map(p=>`<option value="${p.id}">${p.label}</option>`).join('')}<option value="custom">사용자 지정</option></select><div id="newSizeInfo" class="size-info"></div><div class="measure-options"><label>단위 <select id="canvasUnit"><option value="px">px</option><option value="mm">mm</option></select></label><label>DPI <input id="newDpi" type="number" min="36" max="1200" value="96"></label><label>방향 <select id="canvasOrientation"><option value="portrait">세로</option><option value="landscape">가로</option></select></label></div><div id="newPrintInfo" class="size-info"></div><div class="dimension-fields"><label>가로 <input id="newWidth" type="number" min="1" max="4096" value="1600" required> <span class="dimensionUnit">px</span></label><span>×</span><label>세로 <input id="newHeight" type="number" min="1" max="4096" value="1200" required> <span class="dimensionUnit">px</span></label></div><div class="preset-buttons"><button type="button" data-preset="1600,1200">기본 4:3</button><button type="button" data-preset="1920,1080">와이드 16:9</button><button type="button" data-preset="1200,1200">정사각형</button></div><div class="dialog-actions"><button value="cancel">취소</button><button id="createDocument" value="create" class="primary">캔버스 만들기</button></div></form></dialog>
 <dialog id="exportDialog"><form method="dialog"><h2>내보내기</h2><p>현재 컷을 PNG 또는 레이어 PSD로 저장합니다.<br><span id="exportSize"></span></p><fieldset class="png-options"><legend>PNG 옵션</legend><label class="export-option"><input type="radio" name="exportBg" value="transparent" checked> 투명 배경 <span class="checker-icon"></span></label><label class="export-option"><input type="radio" name="exportBg" value="white"> 흰색 배경</label><label class="export-option"><input id="pngDpi" type="checkbox" checked>DPI 메타데이터 포함</label></fieldset><div class="dialog-actions"><button value="cancel">취소</button><button id="downloadPsd" type="button">PSD 저장</button><button id="downloadPng" class="primary" value="export">PNG 저장</button></div></form></dialog>
 <dialog id="helpDialog"><h2>사용법 · 단축키</h2><p>왼쪽에서 도구를 고르면 위쪽 막대에 그 도구의 설정만 표시됩니다. 모든 명령은 상단 메뉴에도 있습니다.<br>레이어 이름 변경: 행 더블클릭 · 순서 변경: 행 드래그 · 패널 경계를 끌어 크기 조절</p><dl class="shortcuts"><dt>B / E / G</dt><dd>펜 / 지우개 / 페인트통</dd><dt>S / V / I / H</dt><dd>사각형 선택 / 레이어 이동 / 스포이트 / 화면 이동</dd><dt>[ / ]</dt><dd>브러시 크기</dd><dt>X</dt><dd>전경색·배경색 교환</dd><dt>M</dt><dd>보기 좌우 반전</dd><dt>Space + 드래그</dt><dd>화면 이동</dd><dt>Ctrl + 휠 / + / − / 0</dt><dd>확대·축소 / 화면 맞춤</dd><dt>Ctrl + Z / Y</dt><dd>실행 취소 / 다시 실행 (Ctrl + Shift + Z)</dd><dt>Ctrl + A / D</dt><dd>전체 선택 / 선택 해제</dd><dt>Ctrl + C / X / V</dt><dd>선택 복사 / 잘라내기 / 새 레이어로 붙여넣기</dd><dt>Ctrl + T</dt><dd>자유 변형 · Enter 확정 · Escape 취소</dd><dt>Delete</dt><dd>선택 영역 지우기 · 선택이 없으면 레이어 지우기</dd><dt>Escape</dt><dd>진행 중인 이동 · 선택 · 채우기 취소</dd><dt>Ctrl + S / Shift + S</dt><dd>저장 / 다른 이름으로 저장</dd><dt>Ctrl + O / N</dt><dd>열기 / 새 캔버스</dd></dl><p class="muted">선택 도구에서 선택 영역 안쪽을 끌면 선택한 픽셀이 이동합니다. 전체 그림 이동은 숨긴 레이어 포함 여부를 위쪽 막대에서 정합니다.<br>자동 복구는 프로젝트 파일 저장을 대신하지 않습니다. 압력 감지·손떨림 보정은 적용하지 않습니다.</p><form method="dialog"><button class="primary">닫기</button></form></dialog>
@@ -616,6 +617,17 @@ $('downloadPsd').onclick=()=>{if(busy||pointer!==null||free)return;$<HTMLDialogE
 };
 $('cancelPsd').onclick=()=>psdAbort?.abort();$<HTMLDialogElement>('psdProgressDialog').addEventListener('cancel',e=>{e.preventDefault();psdAbort?.abort();});
 
+// Split import: the dialog only chooses pieces; cuts are created through the same exclusive path as other cut edits.
+const splitDialog=imageSplitDialog((image,fileName,pieces,enlarge)=>void cutAction(async()=>{await story.addImageCuts(image,fileName,pieces,enlarge);notify(`${pieces.length}개 조각을 새 컷으로 만들었습니다. 원본 위의 빈 레이어에 그릴 수 있습니다.`);}));
+$('splitImport').onclick=()=>{if(pointer===null&&!busy&&!free)input('splitInput').click();};
+input('splitInput').onchange=()=>{const file=input('splitInput').files?.[0];input('splitInput').value='';if(!file||busy||pointer!==null||free||document.querySelector('dialog[open]'))return;void(async()=>{
+  const url=URL.createObjectURL(file);
+  try{if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>64*1048576)throw new Error('64 MiB 이하의 PNG·JPEG·WebP 파일을 선택하세요.');
+    const img=await loadImage(url);if(img.naturalWidth>8192||img.naturalHeight>8192)throw new Error('가져올 이미지가 너무 큽니다.');
+    if(!busy&&pointer===null&&!free&&!document.querySelector('dialog[open]'))splitDialog.open(img,file.name);
+  }catch(e){notify(error(e));}finally{URL.revokeObjectURL(url);}
+})();};
+if(import.meta.env.DEV)(window as any).__split=splitDialog;
 const testPanel=brushTestPanel(()=>({tools:brushSettings(preferences.tools),color}));$('brushTest').onclick=()=>safe(()=>{if(!document.querySelector('dialog[open]'))testPanel.open();});
 bindNumbers();toolOptions();syncToolOverview();syncToolSets();if(preferencesError)notify(`도구 설정 읽기 실패: ${preferencesError}`);
 initLayerPanel(sidebar,$('sidebarResize'),$<HTMLButtonElement>('toggleSidebar'),()=>!busy && pointer===null && !free,notify);
