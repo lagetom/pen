@@ -8,7 +8,7 @@ async function state(p:Page){return p.evaluate(()=>(window as any).__paint.freeT
 async function start(p:Page){await p.locator('#stage').focus();await p.keyboard.press('Control+t');await expect(p.locator('#transformControls')).toBeVisible();}
 async function seed(p:Page){await p.evaluate(()=>{const a=(window as any).__paint.app,g=a.selected.canvas.getContext('2d');g.fillStyle='#ff0000';g.fillRect(16,16,32,16);g.clearRect(20,20,4,4);g.fillStyle='rgba(0,0,255,.5)';g.fillRect(24,20,4,4);a.changed();a.render();a.history.clear();});}
 async function canvasPoint(p:Page,x:number,y:number){return p.evaluate(({x,y})=>{const p=(window as any).__paint,r=document.getElementById('paper')!.getBoundingClientRect();return {x:r.x+(p.mirrored?p.app.width-x:x)*p.zoom,y:r.y+y*p.zoom};},{x,y});}
-async function pixel(p:Page,x:number,y:number){return p.evaluate(({x,y})=>Array.from((window as any).__paint.app.selected.canvas.getContext('2d').getImageData(x,y,1,1).data),{x,y});}
+async function pixel(p:Page,x:number,y:number,layer?:number){return p.evaluate(({x,y,layer})=>{const a=(window as any).__paint.app;return Array.from((layer===undefined?a.selected:a.layers[layer]).canvas.getContext('2d').getImageData(x,y,1,1).data);},{x,y,layer});}
 test.beforeEach(async({page})=>{await page.goto('/');await ready(page);await menu(page,'new');await page.locator('#newWidth').fill('128');await page.locator('#newHeight').fill('96');await page.locator('#createDocument').click();await seed(page);});
 
 test('레이어 자유 변형 크기·비율·%·각도, 실시간 픽셀과 한 단계 Undo/Redo',async({page})=>{
@@ -52,16 +52,17 @@ test('입력 보호·무효 수치·변형 중 컷/레이어/저장 잠금·blur
   await page.evaluate(()=>window.dispatchEvent(new Event('blur')));expect(await state(page)).toBeNull();expect(await pixels(page)).toEqual(before);expect(await page.locator('#sidebar').evaluate(el=>el.inert)).toBe(false);
 });
 
-test('가져온 원본 해상도·자동 축소 후 100% 재확대는 원본 픽셀, 취소·Undo·메타데이터',async({page})=>{
+test('가져온 이미지는 캔버스보다 커도 원본 크기·원본 픽셀, 취소·Undo·메타데이터',async({page})=>{
   const png=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=256;c.height=128;const g=c.getContext('2d')!;for(let x=0;x<256;x++){g.fillStyle=x%2?'#0000ff':'#ff0000';g.fillRect(x,0,1,128);}return c.toDataURL().split(',')[1];});
   await page.locator('#imageInput').setInputFiles({name:'원본.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});await expect(page.locator('#transformControls')).toBeVisible();await expect(page.locator('#transformSource')).toContainText('원본 256 × 128 px');
-  const fitted=await pixels(page);expect((await state(page)).width).toBe(128);
-  await page.locator('#transformUnit').selectOption('percent');await page.locator('#transformWidth').fill('100');
-  await expect.poll(()=>pixel(page,0,30)).toEqual([255,0,0,255]);expect(await pixel(page,1,30)).toEqual([0,0,255,255]);
+  // 256×128 on a 128×96 canvas: placed 1:1 and centred, so canvas x=0 shows source column 64.
+  const fitted=await pixels(page);expect(await state(page)).toMatchObject({width:256,height:128,cx:64,cy:48});await expect(page.locator('#toast')).toContainText('원본 크기');
+  expect(await pixel(page,0,30)).toEqual([255,0,0,255]);expect(await pixel(page,1,30)).toEqual([0,0,255,255]);
+  await page.locator('#transformUnit').selectOption('percent');await page.locator('#transformWidth').fill('50');await expect.poll(async()=>(await state(page)).width).toBe(128);
   await page.locator('#cancelTransform').click();expect(await pixels(page)).toEqual(fitted);
   // Re-import retains a fresh high resolution source until this import's transform is committed.
   await page.locator('#imageInput').setInputFiles({name:'원본.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});await expect(page.locator('#transformControls')).toBeVisible();const initial=await pixels(page);
-  await page.locator('#transformUnit').selectOption('percent');await page.locator('#transformWidth').fill('100');await page.locator('#applyTransform').click();const final=await pixels(page);
+  await page.locator('#transformUnit').selectOption('percent');await page.locator('#transformWidth').fill('50');await page.locator('#applyTransform').click();const final=await pixels(page);expect(final).not.toEqual(initial);
   await page.keyboard.press('Control+z');expect(await pixels(page)).toEqual(initial);await page.keyboard.press('Control+y');expect(await pixels(page)).toEqual(final);
   const p=await page.evaluate(async()=>(window as any).__paint.story.serialize('원본 정보'));expect(p.cuts[0].layers[2].imageSource).toEqual({width:256,height:128,name:'원본.png'});
   await page.locator('#duplicateLayer').click();expect(await page.evaluate(()=>(window as any).__paint.app.selected.imageSource)).toEqual({width:256,height:128,name:'원본.png'});
@@ -98,4 +99,24 @@ test('회전 후 네 모서리 고정점·자유 비율·무변경 확정·빈 �
     let empty=false,limit=false;p.clearLayer();try{new FreeTransform(p);}catch{empty=true;}try{new FreeTransform({stroke:null,width:5000,height:5000} as any);}catch{limit=true;}p.history.undo();return {results,empty,limit,restored:p.selected.canvas.toDataURL()===initial};});
   expect(checked.empty&&checked.limit&&checked.restored).toBe(true);for(const r of checked.results){expect(r.width).toBeCloseTo(32);expect(r.height).toBeCloseTo(24);expect(r.anchorError).toBeLessThan(.00001);}
   await start(page);const before=await state(page);await page.keyboard.press('m');await page.keyboard.press('Control+-');expect(await state(page)).toEqual(before);await page.keyboard.press('Escape');
+});
+
+test('캔버스를 이미지 크기로: 모든 컷 크기·가운데 유지·원본 픽셀·취소·저장 복원·한도',async({page})=>{
+  const make=(w:number,h:number)=>page.evaluate(({w,h})=>{const c=document.createElement('canvas');c.width=w;c.height=h;const g=c.getContext('2d')!;g.fillStyle='#00ff00';g.fillRect(0,0,w,h);g.fillStyle='#ff0000';g.fillRect(0,0,1,1);g.fillStyle='#0000ff';g.fillRect(w-1,h-1,1,1);return c.toDataURL().split(',')[1];},{w,h});
+  const file=async(w:number,h:number)=>({name:'큰 그림.png',mimeType:'image/png',buffer:Buffer.from(await make(w,h),'base64')});
+  const info=()=>page.evaluate(()=>{const p=(window as any).__paint;return {size:p.story.cuts.map((c:any)=>[c.paint.width,c.paint.height]),history:p.app.history.past.length,layers:p.app.layers.length,transform:!!p.freeTransform};});
+  await page.evaluate(()=>{const a=(window as any).__paint.app,g=a.selected.canvas.getContext('2d');g.fillStyle='#000';g.fillRect(60,44,8,8);a.changed();a.render();});
+  await page.locator('#addCut').click();await ready(page);await page.locator('.cut-card').first().click();await ready(page);
+  await page.locator('#imageInput').setInputFiles(await file(128,96));await expect(page.locator('#transformControls')).toBeVisible();await expect(page.locator('#fitCanvasToImage')).toBeHidden();await page.locator('#cancelTransform').click();
+  await page.locator('#imageInput').setInputFiles(await file(200,150));await expect(page.locator('#fitCanvasToImage')).toBeVisible();const before=await info();
+  page.once('dialog',d=>{expect(d.message()).toContain('모든 컷(2개)');void d.dismiss();});await page.locator('#fitCanvasToImage').click();expect(await info()).toEqual(before);expect(before.transform).toBe(true);
+  page.once('dialog',d=>void d.accept());await page.locator('#fitCanvasToImage').click();await ready(page);await expect(page.locator('#dimensions')).toHaveText('200 × 150 px');await expect(page.locator('#transformControls')).toBeHidden();
+  expect(await info()).toEqual({size:[[200,150],[200,150]],history:0,layers:before.layers,transform:false});
+  // The image fills the canvas untouched; earlier artwork moved by the centring offset (36, 27).
+  const top=before.layers-1;expect(await pixel(page,0,0,top)).toEqual([255,0,0,255]);expect(await pixel(page,199,149,top)).toEqual([0,0,255,255]);expect(await pixel(page,100,75,top)).toEqual([0,255,0,255]);
+  expect(await pixel(page,96,71,0)).toEqual([0,0,0,255]);expect(await pixel(page,103,78,0)).toEqual([0,0,0,255]);expect(await pixel(page,95,71,0)).toEqual([0,0,0,0]);expect(await pixel(page,104,78,0)).toEqual([0,0,0,0]);
+  await page.locator('.cut-card').nth(1).click();await ready(page);await expect(page.locator('#dimensions')).toHaveText('200 × 150 px');await page.locator('.cut-card').first().click();await ready(page);
+  const saved=await page.evaluate(()=>(window as any).__paint.app.layers.map((l:any)=>l.canvas.toDataURL())),project=await page.evaluate(async()=>(window as any).__paint.story.serialize('맞춤'));expect([project.width,project.height]).toEqual([200,150]);
+  page.on('dialog',d=>void d.accept());await page.locator('#fileInput').setInputFiles({name:'fit.mpaint',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(project))});await ready(page);expect(await page.evaluate(()=>(window as any).__paint.app.layers.map((l:any)=>l.canvas.toDataURL()))).toEqual(saved);
+  await page.locator('#imageInput').setInputFiles(await file(4100,8));await expect(page.locator('#fitCanvasToImage')).toBeVisible();await page.locator('#fitCanvasToImage').click();await expect(page.locator('#toast')).toContainText('4096px');await expect(page.locator('#transformControls')).toBeVisible();await expect(page.locator('#dimensions')).toHaveText('200 × 150 px');
 });

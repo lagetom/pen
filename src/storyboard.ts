@@ -113,6 +113,26 @@ export class Storyboard {
       this.current = previous; await this.thaw(previous); throw e;
     }
   }
+  /** Resizes every cut's canvas, keeping artwork centred. Pixels outside the new size are lost and undo history is cleared. */
+  async resizeCanvas(width: number, height: number) {
+    dimensions(width, height); if (width === this.width && height === this.height) return;
+    for (const cut of this.cuts) {
+      if (cut.paint.stroke) throw new Error('그리는 중에는 캔버스 크기를 바꿀 수 없습니다.');
+      if (cut.paint.layers.length * width * height > 128e6) throw new Error(`“${cut.name}” 컷의 레이어가 많아 이 크기로 바꿀 수 없습니다(컷당 레이어 픽셀 합계 128백만 이하).`);
+    }
+    const current = this.current;
+    // One cut at a time is decoded, resized and compressed again, so memory stays bounded for any cut count.
+    for (const cut of this.cuts) {
+      await this.thaw(cut); const p = cut.paint, dx = Math.round((width - p.width) / 2), dy = Math.round((height - p.height) / 2), live = new Set(p.layers);
+      for (const l of p.referencedLayers()) if (!live.has(l)) l.canvas.width = l.canvas.height = 0;
+      p.history.clear();
+      for (const l of p.layers) { const copy = canvas(p.width, p.height); ctx(copy).drawImage(l.canvas, 0, 0); l.canvas.width = width; l.canvas.height = height; ctx(l.canvas).drawImage(copy, dx, dy); copy.width = copy.height = 0; }
+      p.width = width; p.height = height; cut.view = null; cut.thumbnail = preview(p);
+      // A cut that cannot be compressed simply stays in memory; every cut must still reach the new size.
+      if (cut !== current) await this.freeze(cut).catch(() => {});
+    }
+    await this.reconcile();
+  }
   async remove() {
     if (this.cuts.length <= 1) throw new Error('컷은 최소 1개가 필요합니다.');
     const old = this.current, i = this.cuts.indexOf(old), next = this.cuts[i-1] ?? this.cuts[i+1];
