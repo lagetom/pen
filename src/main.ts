@@ -157,7 +157,7 @@ for(const [id,action] of [['selectAll',selectAll],['deselect',deselect],['copySe
 function error(e: unknown) { return e instanceof Error ? e.message : String(e); }
 // Transform UI is outside the pixel engine. Ordinary drawing never allocates its buffers.
 stage.before(Object.assign(document.createElement('div'),{id:'transformControls',className:'transform-actions',hidden:true}));
-$('transformControls').innerHTML=`<label><input id="transformLock" type="checkbox" checked> 비율 고정</label><label>너비 <input id="transformWidth" type="number" min="0.001" step="any" aria-label="변형 너비"></label><label>높이 <input id="transformHeight" type="number" min="0.001" step="any" aria-label="변형 높이"></label><select id="transformUnit" aria-label="변형 크기 단위"><option value="px">px</option><option value="percent">%</option></select><label>각도 <input id="transformAngle" type="number" min="-36000" max="36000" step="any" value="0" aria-label="변형 각도">°</label><button id="applyTransform">확정 (Enter)</button><button id="cancelTransform">취소 (Esc)</button><span id="transformSource"></span>`;
+$('transformControls').innerHTML=`<label><input id="transformLock" type="checkbox" checked> 비율 고정</label><label>너비 <input id="transformWidth" type="number" min="0.001" step="any" aria-label="변형 너비"></label><label>높이 <input id="transformHeight" type="number" min="0.001" step="any" aria-label="변형 높이"></label><select id="transformUnit" aria-label="변형 크기 단위"><option value="px">px</option><option value="percent">%</option></select><label>각도 <input id="transformAngle" type="number" min="-36000" max="36000" step="any" value="0" aria-label="변형 각도">°</label><button id="fitCanvasToImage" title="모든 컷의 캔버스를 이 이미지의 원본 크기로 바꿉니다" hidden>캔버스를 이미지 크기로</button><button id="applyTransform">확정 (Enter)</button><button id="cancelTransform">취소 (Esc)</button><span id="transformSource"></span>`;
 paper.insertAdjacentHTML('beforeend',`<div id="transformOverlay" hidden aria-label="자유 변형"><div id="transformFrame"></div>${['nw','ne','sw','se'].map(h=>`<span class="transform-handle ${h}" data-transform-handle="${h}" aria-label="${h} 크기 조절"></span>`).join('')}<span class="transform-handle rotate" data-transform-handle="rotate" aria-label="회전"></span></div>`);
 function syncTransformNumbers(force=false){
   if(!free)return;const s=free.state,percent=($('transformUnit') as HTMLSelectElement).value==='percent';
@@ -178,9 +178,11 @@ function transformLockUI(){
   // The transform bar takes the context bar's place, so the stage does not move.
   $('toolOptions').hidden=locked;$('transformControls').hidden=!locked;$('selectionOverlay').hidden=locked||!selection;
 }
+let importing:ImportSource|null=null;
 function beginTransform(imported?:ImportSource){
   if(free||busy||pointer!==null||saving)return;
-  try{free=new FreeTransform(app,imported?null:selection,imported);input('transformLock').checked=true;($('transformUnit') as HTMLSelectElement).value='px';
+  try{free=new FreeTransform(app,imported?null:selection,imported);importing=imported??null;
+    $('fitCanvasToImage').hidden=!imported||(imported.image.naturalWidth===app.width&&imported.image.naturalHeight===app.height);input('transformLock').checked=true;($('transformUnit') as HTMLSelectElement).value='px';
     const origin=app.selected.imageSource;$('transformSource').textContent=`기준 ${free.sourceWidth} × ${free.sourceHeight} px`+(origin?` · 원본 ${origin.width} × ${origin.height} px`:'');
     transformLockUI();syncTransformNumbers(true);renderTransform();ui();stage.focus({preventScroll:true});
   }catch(e){notify(error(e));}
@@ -192,8 +194,20 @@ function endTransform(apply:boolean){
   if(pointer!==null){const id=pointer;pointer=null;if(stage.hasPointerCapture(id))stage.releasePointerCapture(id);}
   try{if(apply)editing.finish();else editing.cancel();}
   catch(e){editing.cancel();notify(error(e));}
-  finally{free=null;selection=apply?null:selection;transformLockUI();renderSelection();renderTransform();layerList.invalidate([app.selected]);ui();render();stage.focus({preventScroll:true});}
+  finally{free=null;importing=null;selection=apply?null:selection;transformLockUI();renderSelection();renderTransform();layerList.invalidate([app.selected]);ui();render();stage.focus({preventScroll:true});}
 }
+// Offered only while placing an imported image: the canvas takes the image's size and the image fills it untouched.
+async function fitCanvasToImage(){
+  if(!free||!importing||pointer!==null||busy)return;const image=importing.image,layer=free.layer,w=image.naturalWidth,h=image.naturalHeight;
+  try{dimensions(w,h);}catch{notify(`이미지(${w} × ${h}px)가 캔버스 최대 크기 4096px를 넘어 맞출 수 없습니다. 이미지를 줄여서 사용하세요.`);return;}
+  if(!confirm(`캔버스를 ${app.width} × ${app.height}px에서 ${w} × ${h}px로 바꿉니다.\n\n· 모든 컷(${story.cuts.length}개)의 크기가 함께 바뀝니다.\n· 기존 그림은 가운데 기준으로 유지되고, 새 크기를 벗어나는 부분은 잘립니다.\n· 실행 취소 기록이 지워집니다.\n\n계속할까요?`))return;
+  endTransform(false);
+  await exclusive(async()=>{
+    try{await story.resizeCanvas(w,h);const g=ctx(layer.canvas);g.clearRect(0,0,w,h);g.drawImage(image,0,0);notify(`캔버스를 이미지 크기 ${w} × ${h}px로 맞췄습니다.`);}
+    finally{bindEngine();fit();revision++;scheduleAuto();}
+  });
+}
+$('fitCanvasToImage').onclick=()=>void fitCanvasToImage();
 function transformDown(e:PointerEvent){
   if(!free||pointer!==null||e.button!==0)return;
   const p=coordinates(e),target=(e.target as HTMLElement).dataset.transformHandle as TransformHandle|undefined;
@@ -461,9 +475,10 @@ async function importImage(file: File) { let original:ImportSource|undefined;awa
   if (file.type !== 'image/png' || file.size > 64 * 1048576) throw new Error('64 MiB 이하의 PNG 파일을 선택하세요.');
   if ((app.layers.length + 1) * app.width * app.height > 128e6 || app.layers.length >= 50) throw new Error('레이어 메모리 한도에 도달했습니다.');
   const url = URL.createObjectURL(file); try { const img = await loadImage(url); if (img.width > 8192 || img.height > 8192) throw new Error('가져올 이미지가 너무 큽니다.');
-    const l = app.makeLayer(file.name.replace(/\.png$/i, '')); l.imageSource={width:img.naturalWidth,height:img.naturalHeight,name:file.name.slice(0,100)}; const scale = Math.min(1, app.width / img.width, app.height / img.height); const w = img.width * scale, h = img.height * scale; ctx(l.canvas).drawImage(img, (app.width - w) / 2, (app.height - h) / 2, w, h);
+    const l = app.makeLayer(file.name.replace(/\.png$/i, '')); l.imageSource={width:img.naturalWidth,height:img.naturalHeight,name:file.name.slice(0,100)}; // Always placed at original size; anything outside the canvas stays available from the source while the transform is open.
+    const w = img.naturalWidth, h = img.naturalHeight, larger = w > app.width || h > app.height; ctx(l.canvas).drawImage(img, (app.width - w) / 2, (app.height - h) / 2, w, h);
     original={image:img,rect:{x:(app.width-w)/2,y:(app.height-h)/2,width:w,height:h}};
-    app.structure('이미지 가져오기', () => { app.layers.push(l); app.active = l.id; }, app.width * app.height * 4); notify(scale < 1 ? '캔버스에 맞게 이미지를 축소해 새 레이어로 가져왔습니다.' : '이미지를 새 레이어로 가져왔습니다.');
+    app.structure('이미지 가져오기', () => { app.layers.push(l); app.active = l.id; }, app.width * app.height * 4); notify(larger ? `이미지(${w} × ${h}px)를 원본 크기로 가져왔습니다. 캔버스보다 커서 확정하면 벗어난 부분이 잘립니다. 크기를 줄이거나 ‘캔버스를 이미지 크기로’를 사용하세요.` : '이미지를 원본 크기로 새 레이어에 가져왔습니다.');
   } finally { URL.revokeObjectURL(url); }
 });if(original)beginTransform(original); }
 input('imageInput').onchange = () => { const file = input('imageInput').files?.[0]; input('imageInput').value = ''; if (file)void importImage(file); };
